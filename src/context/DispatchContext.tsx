@@ -934,7 +934,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
         // 1. Brand new order detected from Google Sheets!
         if (!before) {
           recordOrderChange(order.orderId);
-          const msg = `הזמנה חדשה התקבלה! #${order.orderId} עבור ${order.customerName} (${order.city})`;
+          const msg = `הזמנה חדשה התקבלה! עבור ${order.customerName} (${order.city})`;
           setLatestOrderEvent({
             type: "new_order",
             orderId: order.orderId,
