@@ -71,7 +71,7 @@ function LiveKpiBanner({ orders }: { orders: Order[] }) {
 
   return (
     <section
-      className="overflow-hidden rounded-2xl border border-sky-500/30 bg-sky-950/20 shadow-sm"
+      className="overflow-hidden rounded-2xl border border-sky-500/30 bg-sky-950/20 shadow-sm transition-all"
       aria-label="מדדי מחסן חיים"
     >
       <button
@@ -97,7 +97,7 @@ function LiveKpiBanner({ orders }: { orders: Order[] }) {
           </div>
           <div
             className={cn(
-              "rounded-xl p-2.5 border border-border/50 text-center",
+              "rounded-xl p-2.5 border border-border/50 text-center transition-colors",
               active > 0 ? "bg-amber-500/15 border-amber-500/30" : "bg-background/80"
             )}
           >
@@ -108,7 +108,7 @@ function LiveKpiBanner({ orders }: { orders: Order[] }) {
           </div>
           <div
             className={cn(
-              "rounded-xl p-2.5 border border-border/50 text-center",
+              "rounded-xl p-2.5 border border-border/50 text-center transition-colors",
               loadReady > 0 ? "bg-rose-500/15 border-rose-500/30" : "bg-background/80"
             )}
           >
@@ -300,7 +300,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Theme Toggle - כפתור מעוצב ומגיב */}
+            {/* Theme Toggle Button */}
             <button
               type="button"
               onClick={toggleTheme}
