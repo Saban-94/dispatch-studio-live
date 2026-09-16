@@ -118,8 +118,19 @@ export function HarashWarehouseApp({
     sumsumSmallPallets: 0,
   });
 
-  // מזהי הזמנות שכבר טופלו או נסגרו - מונע לולאת תקיעה
-  const [dismissedAlertOrderIds, setDismissedAlertOrderIds] = useState<Set<string>>(new Set());
+  // מזהי הזמנות שנסגרו עם גיבוי ב-sessionStorage למניעת הצפה חוזרת
+  const [dismissedAlertOrderIds, setDismissedAlertOrderIds] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = sessionStorage.getItem("saban_dismissed_alerts");
+        return saved ? new Set(JSON.parse(saved)) : new Set();
+      } catch {
+        return new Set();
+      }
+    }
+    return new Set();
+  });
+
   const [activeAlert, setActiveAlert] = useState<{
     orderId: string;
     client: string;
@@ -127,7 +138,7 @@ export function HarashWarehouseApp({
   } | null>(null);
 
   useEffect(() => {
-    if (activeAlert) return; // לא מפעיל בדיקה אם יש התראה פעילה
+    if (activeAlert) return;
 
     for (const order of harashOrders) {
       const orderId = String(order?.orderId || (order as any)?.id || "");
@@ -154,7 +165,15 @@ export function HarashWarehouseApp({
   }, [harashOrders, dismissedAlertOrderIds, activeAlert]);
 
   const handleDismissAlert = (orderId: string) => {
-    setDismissedAlertOrderIds((prev) => new Set(prev).add(orderId));
+    setDismissedAlertOrderIds((prev) => {
+      const next = new Set(prev).add(orderId);
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem("saban_dismissed_alerts", JSON.stringify(Array.from(next)));
+        } catch {}
+      }
+      return next;
+    });
     setActiveAlert(null);
   };
 
@@ -163,8 +182,7 @@ export function HarashWarehouseApp({
       ...prev,
       sumsumBags: prev.sumsumBags + count,
     }));
-    setDismissedAlertOrderIds((prev) => new Set(prev).add(orderId));
-    setActiveAlert(null);
+    handleDismissAlert(orderId);
     setActiveTab("truck_builder");
   };
 
@@ -254,15 +272,19 @@ export function HarashWarehouseApp({
         </div>
       </header>
 
-      {/* Popup התרעה דחופה ל-10 בלות סומסום - עם מנגנון שחרור מלא */}
+      {/* Popup התרעה דחופה ל-10 בלות סומסום - מודאל מרכזי צף וסגיר במגע */}
       <AnimatePresence>
         {activeAlert && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto">
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+            onClick={() => handleDismissAlert(activeAlert.orderId)}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-sm rounded-3xl border-2 border-rose-500 bg-rose-950 p-5 text-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm rounded-3xl border-2 border-rose-500 bg-rose-950 p-5 text-white shadow-2xl relative"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2.5">
