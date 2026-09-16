@@ -949,7 +949,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
           // If brand new order is urgent/high priority, announce it in Hebrew
           if (isHighPriorityUrgentOrder(order)) {
             speakHebrew(
-              `התקבלה הזמנה דחופה חדשה! מספר ${order.orderId}, עבור ${order.customerName}, סבב ${order.round}.`,
+              `התקבלה הזמנה בסידור חדשה! מספר ${order.orderId}, עבור ${order.customerName}, סבב ${order.round}.`,
             );
           }
           return;
@@ -1084,7 +1084,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
             saveLocalOverrides(next);
             return next;
           });
-          pushAlert(`הזמנה #${orderId} סונכרנה בהצלחה לגיליון Google Sheets`, "success");
+          pushAlert(`הזמנה סונכרנה בהצלחה לגיליון Google Sheets`, "success");
           return true;
         }
         return false;
@@ -1264,7 +1264,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
           setAlerts((prev) => {
             if (prev.some((a) => a.id === key)) return prev;
             const isUrgent = mins <= 10;
-            const msg = `נותרו ${mins} דקות ליעד — הזמנה ${order.orderId} ל${order.customerName} (${order.city})`;
+            const msg = `נותרו ${mins} דקות ליעד — הזמנה  ל${order.customerName} (${order.city})`;
             if (isUrgent) {
               setLatestOrderEvent({
                 type: "status_urgent",
