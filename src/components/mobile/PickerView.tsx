@@ -24,11 +24,10 @@ import {
   Square,
   Layers,
   ArrowRight,
+  Package,
 } from "lucide-react";
 import type { Order } from "@/types/dispatch";
-import { useTheme } from "@/hooks/useTheme";
 import { InventoryDemandCard } from "./InventoryDemandCard";
-import { ProductSlide } from "@/components/screensaver/ProductSlide";
 import { cn } from "@/lib/utils";
 
 interface PickerViewProps {
@@ -47,18 +46,41 @@ interface ParsedItem {
 }
 
 export function PickerView({
-  orders,
+  orders = [],
   onUpdateStatus,
   onRefresh,
   isRefreshing = false,
 }: PickerViewProps) {
-  const { isDark, toggleTheme } = useTheme();
+  // ניהול מצב יום/לילה מקומי ובטוח שאינו תלוי בקונטקסט שעלול להתרסק
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return document.documentElement.classList.contains("dark");
+    }
+    return true;
+  });
+
+  const toggleTheme = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        if (next) {
+          document.documentElement.classList.add("dark");
+          localStorage.setItem("theme", "dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+          localStorage.setItem("theme", "light");
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const [activeTab, setActiveTab] = useState<TabType>("picking");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBranch, setSelectedBranch] = useState<string>("all");
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
-  // מנגנון שומר מסך במובייל (כיבוי ידני או חוסר פעילות)
+  // מנגנון שומר מסך במובייל (Inactivity Idle Timer)
   const [screensaverActive, setScreensaverActive] = useState(false);
   const [screensaverEnabled, setScreensaverEnabled] = useState(true);
   const [screensaverMenuOpen, setScreensaverMenuOpen] = useState(false);
@@ -68,7 +90,7 @@ export function PickerView({
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     if (!screensaverEnabled || screensaverActive) return;
 
-    // מעבר לשומר מסך לאחר 60 שניות ללא מגע
+    // הפעלה אוטומטית אחרי 60 שניות ללא מגע
     idleTimerRef.current = setTimeout(() => {
       setScreensaverActive(true);
     }, 60000);
@@ -85,19 +107,19 @@ export function PickerView({
     };
   }, [resetIdleTimer]);
 
-  // סיווג הזמנות פעילות
+  // סיווג הזמנות פעילות בצורה עמידה ל-undefined
   const pickingOrders = useMemo(() => {
-    return orders.filter((o) =>
+    return (orders || []).filter((o) =>
       ["בסידור עבודה", "בהכנה", "בהמתנה"].some(
-        (st) => o.status?.trim() === st || o.stage?.trim() === st
+        (st) => o?.status?.trim() === st || o?.stage?.trim() === st
       )
     );
   }, [orders]);
 
   const readyOrders = useMemo(() => {
-    return orders.filter((o) =>
+    return (orders || []).filter((o) =>
       ["מוכן להעמסה", "בהעמסה", "יצא לדרך"].some(
-        (st) => o.status?.trim() === st || o.stage?.trim() === st
+        (st) => o?.status?.trim() === st || o?.stage?.trim() === st
       )
     );
   }, [orders]);
@@ -108,17 +130,17 @@ export function PickerView({
     return list.filter((order) => {
       const matchBranch =
         selectedBranch === "all" ||
-        (order.warehouse && order.warehouse.includes(selectedBranch)) ||
-        (order.branch && order.branch.includes(selectedBranch));
+        (order?.warehouse && order.warehouse.includes(selectedBranch)) ||
+        (order?.branch && order.branch.includes(selectedBranch));
 
       const query = searchQuery.trim().toLowerCase();
       if (!query) return matchBranch;
 
       const matchText =
-        (order.client && order.client.toLowerCase().includes(query)) ||
-        (order.destination && order.destination.toLowerCase().includes(query)) ||
-        (order.id && order.id.toLowerCase().includes(query)) ||
-        (order.productsSummary && order.productsSummary.toLowerCase().includes(query));
+        (order?.client && order.client.toLowerCase().includes(query)) ||
+        (order?.destination && order.destination.toLowerCase().includes(query)) ||
+        (order?.id && String(order.id).toLowerCase().includes(query)) ||
+        (order?.productsSummary && order.productsSummary.toLowerCase().includes(query));
 
       return matchBranch && matchText;
     });
@@ -133,40 +155,65 @@ export function PickerView({
     await onUpdateStatus(order.id, targetStatus);
   };
 
-  // תצוגת שומר מסך מובייל (עם תפריט צד מנוקה מהגדרות ניהול)
+  // תצוגת שומר מסך פנימית עצמאית במובייל (ללא תלות שעלולה להקריס)
   if (screensaverActive) {
     return (
-      <div dir="rtl" className="relative h-screen w-full bg-background overflow-hidden select-none">
-        {/* Top Floating Control Bar */}
-        <div className="absolute top-4 inset-x-4 z-50 flex items-center justify-between">
+      <div dir="rtl" className="relative h-screen w-full bg-background overflow-hidden select-none flex flex-col justify-between p-5">
+        {/* Top Control Bar */}
+        <div className="flex items-center justify-between z-20">
           <button
             onClick={() => setScreensaverMenuOpen(true)}
-            className="grid size-12 place-items-center rounded-2xl bg-card/90 border border-border/80 text-foreground shadow-xl backdrop-blur-md active:scale-95"
-            title="תפריט מידע"
+            className="grid size-12 place-items-center rounded-2xl bg-card border border-border/80 text-foreground shadow-lg active:scale-95"
+            title="מידע תפעולי"
           >
             <Menu className="size-6 text-primary" />
           </button>
 
           <button
             onClick={() => setScreensaverActive(false)}
-            className="flex items-center gap-2 h-12 px-4 rounded-2xl bg-primary text-primary-foreground font-black text-xs shadow-xl active:scale-95 transition"
+            className="flex items-center gap-2 h-12 px-5 rounded-2xl bg-primary text-primary-foreground font-black text-xs shadow-lg active:scale-95 transition"
           >
             <ArrowRight className="size-4" />
             <span>חזרה למסוף מלקט</span>
           </button>
         </div>
 
-        {/* שומר מסך שקופיות מוצר */}
-        <div className="h-full w-full pt-16 pb-4 px-2">
-          <ProductSlide
-            orders={orders}
-            branchFilter={selectedBranch === "all" ? "all" : (selectedBranch as any)}
-            intervalSeconds={12}
-            prioritizeCritical={true}
-          />
+        {/* Center Live Screensaver Hub */}
+        <div className="flex flex-col items-center justify-center text-center gap-4 my-auto">
+          <div className="grid size-20 place-items-center rounded-3xl bg-primary/15 text-primary border border-primary/30 shadow-2xl animate-pulse">
+            <Monitor className="size-10" />
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-black text-foreground">שומר מסך פעיל · מגרש</h2>
+            <p className="text-sm font-semibold text-muted-foreground mt-1">
+              ח. סבן חומרי בניין (1994) בע"מ
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 w-full max-w-xs mt-4">
+            <div className="rounded-2xl border border-border/80 bg-card p-3.5 text-center shadow-sm">
+              <span className="text-xs font-bold text-muted-foreground block">הזמנות לליקוט</span>
+              <span className="text-2xl font-black text-foreground tabular-nums">
+                {pickingOrders.length}
+              </span>
+            </div>
+
+            <div className="rounded-2xl border border-border/80 bg-card p-3.5 text-center shadow-sm">
+              <span className="text-xs font-bold text-muted-foreground block">מוכן / בהעמסה</span>
+              <span className="text-2xl font-black text-emerald-500 tabular-nums">
+                {readyOrders.length}
+              </span>
+            </div>
+          </div>
         </div>
 
-        {/* תפריט צד מובייל בשומר המסך (נקי מהגדרות אדמין, מותאם למשתמש שטח) */}
+        {/* Bottom Hint */}
+        <div className="text-center text-xs font-bold text-muted-foreground pb-2">
+          גע במסך בכל עת כדי לחזור למסוף
+        </div>
+
+        {/* תפריט צד מובייל נקי מהגדרות מנהל */}
         <AnimatePresence>
           {screensaverMenuOpen && (
             <>
@@ -198,30 +245,15 @@ export function PickerView({
                     </div>
                     <button
                       onClick={() => setScreensaverMenuOpen(false)}
-                      className="grid size-8 place-items-center rounded-lg bg-secondary text-muted-foreground hover:text-foreground"
+                      className="grid size-8 place-items-center rounded-lg bg-secondary text-muted-foreground"
                     >
                       <X className="size-4" />
                     </button>
                   </div>
 
-                  {/* Operational Summaries */}
                   <div className="flex flex-col gap-3 mt-5">
                     <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
-                      <span className="text-xs text-muted-foreground block font-medium">הזמנות לליקוט</span>
-                      <span className="text-2xl font-black text-foreground tabular-nums">
-                        {pickingOrders.length}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
-                      <span className="text-xs text-muted-foreground block font-medium">מוכנות / בהעמסה</span>
-                      <span className="text-2xl font-black text-emerald-500 tabular-nums">
-                        {readyOrders.length}
-                      </span>
-                    </div>
-
-                    <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
-                      <span className="text-xs text-muted-foreground block font-medium">סניף מוצג</span>
+                      <span className="text-xs text-muted-foreground block font-medium">סניף פעיל</span>
                       <span className="text-sm font-black text-foreground mt-0.5 block">
                         {selectedBranch === "all" ? "כל המגרשים" : selectedBranch}
                       </span>
@@ -281,7 +313,7 @@ export function PickerView({
 
           {/* Action Controls: Prominent Theme Toggle, Branch Selector, Screensaver & Refresh */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* כפתור עיצוב בהיר / כהה מוגדל ובולט */}
+            {/* כפתור עיצוב יום/לילה בולט */}
             <button
               onClick={toggleTheme}
               className={cn(
@@ -307,7 +339,7 @@ export function PickerView({
               <option value="התלמיד">התלמיד</option>
             </select>
 
-            {/* כפתור שומר מסך ידני */}
+            {/* שומר מסך ידני */}
             <button
               onClick={() => setScreensaverActive(true)}
               className="grid size-11 place-items-center rounded-2xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary"
@@ -422,7 +454,6 @@ export function PickerView({
       {/* Floating Bottom Navigation Bar */}
       <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-border/80 bg-card/95 backdrop-blur-2xl px-3.5 py-2 shadow-2xl">
         <div className="grid grid-cols-3 gap-2.5 max-w-md mx-auto">
-          {/* לליקוט */}
           <button
             onClick={() => setActiveTab("picking")}
             className={cn(
@@ -448,7 +479,6 @@ export function PickerView({
             <span className="text-xs font-black mt-1">לליקוט ({pickingOrders.length})</span>
           </button>
 
-          {/* בהעמסה */}
           <button
             onClick={() => setActiveTab("ready")}
             className={cn(
@@ -474,7 +504,6 @@ export function PickerView({
             <span className="text-xs font-black mt-1">בהעמסה ({readyOrders.length})</span>
           </button>
 
-          {/* מלאי מגרש */}
           <button
             onClick={() => setActiveTab("inventory")}
             className={cn(
@@ -493,7 +522,6 @@ export function PickerView({
   );
 }
 
-// קומפוננטת כרטיסייה נפתחת בלחיצה ומחלצת מק"טים בנפרד
 interface CollapsibleOrderCardProps {
   order: Order;
   activeTab: TabType;
@@ -509,24 +537,20 @@ function CollapsibleOrderCard({
   onToggleExpand,
   onAdvanceStatus,
 }: CollapsibleOrderCardProps) {
-  // פירוק טקסט המוצרים מעמודה H לשורות מובנות
   const parsedItems: ParsedItem[] = useMemo(() => {
-    if (!order.productsSummary) return [];
+    if (!order?.productsSummary) return [];
 
-    return order.productsSummary
+    return String(order.productsSummary)
       .split(/[\n,;]+/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
       .map((line) => {
-        // זיהוי מק"ט במידה וקיים בתבנית: מק"ט: 12345
         const skuMatch = line.match(/(?:מק["'״]?ט|קוד)[:\s]*([0-9]{4,6})/i);
         const sku = skuMatch ? skuMatch[1] : undefined;
 
-        // זיהוי כמות
         const qtyMatch = line.match(/(?:כמות[:\s]*)?([0-9]+(?:\.[0-9]+)?)\s*(?:שק|משטח|יח|בלה|ק"ג)?/);
         const quantity = qtyMatch ? qtyMatch[0] : "1";
 
-        // ניקוי שם המוצר
         let clean = line
           .replace(/(?:מק["'״]?ט|קוד)[:\s]*([0-9]{4,6})/gi, "")
           .replace(/📦/g, "")
@@ -539,7 +563,7 @@ function CollapsibleOrderCard({
           quantity,
         };
       });
-  }, [order.productsSummary]);
+  }, [order?.productsSummary]);
 
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
 
@@ -550,7 +574,6 @@ function CollapsibleOrderCard({
 
   return (
     <div className="overflow-hidden rounded-3xl border border-border/80 bg-card shadow-sm transition-all">
-      {/* אזור ראשי לחיץ לפתיחה/סגירה */}
       <div
         onClick={onToggleExpand}
         className="p-4 flex flex-col gap-3 cursor-pointer active:bg-secondary/30 transition select-none"
@@ -559,12 +582,12 @@ function CollapsibleOrderCard({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-black text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-lg">
-                הזמנה #{order.id}
+                הזמנה #{order?.id}
               </span>
-              <span className="text-xs font-bold text-muted-foreground">{order.time || "היום"}</span>
+              <span className="text-xs font-bold text-muted-foreground">{order?.time || "היום"}</span>
             </div>
             <h3 className="text-base font-black text-foreground mt-1 leading-snug truncate">
-              {order.client || "לקוח כללי"}
+              {order?.client || "לקוח כללי"}
             </h3>
           </div>
 
@@ -572,12 +595,12 @@ function CollapsibleOrderCard({
             <span
               className={cn(
                 "h-8 flex items-center rounded-xl px-3 text-xs font-black border shadow-sm",
-                order.deliveryType === "מנוף"
+                order?.deliveryType === "מנוף"
                   ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
                   : "bg-primary/15 text-primary border-primary/30"
               )}
             >
-              {order.deliveryType || "פריקה רגילה"}
+              {order?.deliveryType || "פריקה רגילה"}
             </span>
 
             <div className="grid size-8 place-items-center rounded-xl bg-secondary text-muted-foreground">
@@ -588,14 +611,13 @@ function CollapsibleOrderCard({
           </div>
         </div>
 
-        {/* יעד ומחסן מוצא */}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground font-semibold">
           <div className="flex items-center gap-1">
             <MapPin className="size-3.5 text-primary shrink-0" />
-            <span className="text-foreground/90">{order.destination || "איסוף עצמי"}</span>
+            <span className="text-foreground/90">{order?.destination || "איסוף עצמי"}</span>
           </div>
 
-          {order.warehouse && (
+          {order?.warehouse && (
             <>
               <span>•</span>
               <div className="flex items-center gap-1">
@@ -606,15 +628,13 @@ function CollapsibleOrderCard({
           )}
         </div>
 
-        {/* תמצית פריטים מהירה במצב סגור */}
         {!isExpanded && (
           <div className="rounded-xl bg-secondary/30 px-3 py-2 text-xs font-semibold text-muted-foreground line-clamp-1 border border-border/50">
-            {order.productsSummary || "לחץ לצפייה בפירוט פריטים ומק\"טים"}
+            {order?.productsSummary || "לחץ לצפייה בפירוט פריטים ומק\"טים"}
           </div>
         )}
       </div>
 
-      {/* אזור נפתח: פירוט פריטי ליקוט עם מק"טים וצ'קבוקס */}
       <AnimatePresence>
         {isExpanded && (
           <motion.div
@@ -634,7 +654,6 @@ function CollapsibleOrderCard({
               </span>
             </div>
 
-            {/* טבלת פריטים מעוצבת למחסנאי */}
             <div className="flex flex-col gap-2">
               {parsedItems.map((item, idx) => {
                 const isChecked = !!checkedItems[idx];
@@ -688,14 +707,13 @@ function CollapsibleOrderCard({
               })}
             </div>
 
-            {/* פרטי נהג וקישור חיוג מהיר */}
             <div className="flex items-center justify-between pt-2 border-t border-border/60 text-xs font-semibold">
               <div className="flex items-center gap-1.5 text-foreground/80">
                 <User className="size-3.5 text-muted-foreground" />
-                <span>נהג: {order.driver || "טרם שובץ"}</span>
+                <span>נהג: {order?.driver || "טרם שובץ"}</span>
               </div>
 
-              {order.phone && (
+              {order?.phone && (
                 <a
                   href={`tel:${order.phone}`}
                   onClick={(e) => e.stopPropagation()}
@@ -707,7 +725,6 @@ function CollapsibleOrderCard({
               )}
             </div>
 
-            {/* כפתורי פעולה פיזיים בתחתית הכרטיס הנפתח */}
             <div className="grid grid-cols-2 gap-2 pt-2">
               {activeTab === "picking" ? (
                 <>
