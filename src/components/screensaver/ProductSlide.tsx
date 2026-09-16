@@ -2,8 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertTriangle,
-  ArrowLeft,
-  ArrowRight,
   Building2,
   CheckCircle2,
   ChevronLeft,
@@ -18,6 +16,7 @@ import {
   TrendingDown,
   Truck,
   Warehouse,
+  ImageIcon,
 } from "lucide-react";
 import type { Order } from "@/types/dispatch";
 import type { NormalizedProductSlideItem, ScreensaverBranchFilter } from "@/types/screensaver";
@@ -45,13 +44,22 @@ export function ProductSlide({
   const [direction, setDirection] = useState<1 | -1>(1);
   const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [imageErrorMap, setImageErrorMap] = useState<Record<string, boolean>>({});
 
-  // Derive normalized product items
+  // חילוץ וחישוב פריטי המלאי המנורמלים בזמן אמת
   const items: NormalizedProductSlideItem[] = useMemo(() => {
     return getNormalizedProductSlideItems(orders, branchFilter, prioritizeCritical);
   }, [orders, branchFilter, prioritizeCritical]);
 
-  // Safe current item
+  // איפוס בטוח של האינדקס אם רשימת הפריטים התקצרה עקב שינוי סינון
+  useEffect(() => {
+    if (currentIndex >= items.length && items.length > 0) {
+      setCurrentIndex(0);
+      setProgress(0);
+    }
+  }, [items.length, currentIndex]);
+
+  // פריט נוכחי מאובטח
   const currentItem = items[currentIndex] || items[0];
 
   const handleNext = useCallback(() => {
@@ -76,7 +84,7 @@ export function ProductSlide({
     });
   }, [onCyclePauseChange]);
 
-  // Dwell timer effect
+  // טיימר מעבר שקופיות דינמי
   useEffect(() => {
     if (isPaused || items.length <= 1) return;
 
@@ -97,15 +105,15 @@ export function ProductSlide({
     return () => clearInterval(timer);
   }, [isPaused, intervalSeconds, items.length, handleNext]);
 
-  // Keyboard navigation
+  // שליטה מהמקלדת למסכי מחשב וסדרנים
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "ArrowRight") {
         e.preventDefault();
-        handlePrev(); // RTL: right goes backward
+        handlePrev(); // RTL: חץ ימינה הולך אחורה
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        handleNext(); // RTL: left goes forward
+        handleNext(); // RTL: חץ שמאלה מתקדם
       } else if (e.key === " ") {
         e.preventDefault();
         togglePause();
@@ -117,35 +125,35 @@ export function ProductSlide({
 
   if (!currentItem) {
     return (
-      <div className="flex h-full w-full items-center justify-center p-12 text-center text-muted-foreground">
-        <Package className="size-16 stroke-1 opacity-40 mb-4" />
-        <p className="text-xl font-bold">לא אותרו פריטי מלאי פעילים לתצוגה כרגע</p>
+      <div className="flex h-full w-full flex-col items-center justify-center p-12 text-center text-muted-foreground">
+        <Package className="size-16 stroke-1 opacity-40 mb-4 animate-pulse" />
+        <p className="text-xl font-bold text-foreground">לא אותרו פריטי מלאי פעילים לתצוגה כרגע</p>
+        <p className="text-sm text-muted-foreground mt-1">המערכת מאזינה להזמנות חדשות בזמן אמת מתוך הגיליון</p>
       </div>
     );
   }
 
-  // Stock status styles
+  // סטטוס מלאי
   const isCritical = currentItem.isCritical;
   const isWarning = currentItem.isWarning;
-  const isHealthy = !isCritical && !isWarning;
 
   const statusBadgeColor = isCritical
-    ? "bg-rose-500/20 text-rose-300 border-rose-500/50"
+    ? "bg-rose-500/20 text-rose-400 border-rose-500/50"
     : isWarning
-      ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
-      : "bg-emerald-500/20 text-emerald-300 border-emerald-500/50";
+      ? "bg-amber-500/20 text-amber-400 border-amber-500/50"
+      : "bg-emerald-500/20 text-emerald-400 border-emerald-500/50";
 
   const progressFillColor = isCritical
-    ? "bg-gradient-to-r from-rose-600 via-rose-500 to-rose-400"
+    ? "bg-gradient-to-l from-rose-600 via-rose-500 to-rose-400"
     : isWarning
-      ? "bg-gradient-to-r from-amber-600 via-amber-500 to-amber-400"
-      : "bg-gradient-to-r from-emerald-600 via-emerald-500 to-emerald-400";
+      ? "bg-gradient-to-l from-amber-600 via-amber-500 to-amber-400"
+      : "bg-gradient-to-l from-emerald-600 via-emerald-500 to-emerald-400";
 
-  // Build WhatsApp share URL for this single product
+  // ניסוח הודעת וואטסאפ מהירה
   const waMessage = [
-    `*📋 עדכון משיכת מלאי יומי — ח. סבן*`,
+    `*📋 עדכון משיכת מלאי יומי — ח. סבן חומרי בניין בע״מ*`,
     `*מוצר:* ${currentItem.cleanName} (מק"ט: ${currentItem.sku})`,
-    `*מחסן:* ${currentItem.warehouseBranch}`,
+    `*מחסן מוצא:* ${currentItem.warehouseBranch}`,
     `*נמשך בפועל היום:* ${currentItem.actualDrawn} ${currentItem.unit}`,
     `*משוריין בהכנה:* ${currentItem.reserved} ${currentItem.unit}`,
     `*יתרת רצפה אפקטיבית:* ${currentItem.effectiveBalance} ${currentItem.unit} (סף ביטחון: ${currentItem.safetyThreshold} ${currentItem.unit})`,
@@ -156,23 +164,27 @@ export function ProductSlide({
 
   const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(waMessage)}`;
 
+  // בדיקת תקינות התמונה של המוצר הנוכחי
+  const hasImageFailed = !!imageErrorMap[currentItem.sku];
+
   return (
     <div
-      className="relative flex h-full w-full flex-col justify-between overflow-hidden rounded-3xl border border-border/80 bg-gradient-to-b from-card/95 via-card/85 to-background/95 p-6 md:p-10 shadow-2xl backdrop-blur-xl"
+      dir="rtl"
+      className="relative flex h-full w-full flex-col justify-between overflow-hidden rounded-3xl border border-border/80 bg-gradient-to-b from-card/95 via-card/85 to-background/95 p-6 md:p-10 shadow-2xl backdrop-blur-xl select-none"
       onMouseEnter={() => pauseOnHover && setIsPaused(true)}
       onMouseLeave={() => pauseOnHover && setIsPaused(false)}
       id="product-screensaver-slide-container"
     >
-      {/* Top Banner: Progress Bar & Slide Controls */}
-      <div className="flex flex-col gap-3">
+      {/* סרגל עליון: בקרת התקדמות וכפתורי ניווט */}
+      <div className="flex flex-col gap-3.5">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs font-black text-primary">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="flex items-center gap-1.5 rounded-xl border border-primary/40 bg-primary/15 px-3 py-1.5 text-xs font-black text-primary shadow-sm">
               <Sparkles className="size-3.5" />
-              <span>שומר מסך · שקופיות מוצר חי</span>
+              <span>שומר מסך · מוצר מגרש חי</span>
             </span>
 
-            <span className="flex items-center gap-1.5 rounded-xl border border-border bg-card/60 px-3 py-1.5 text-xs font-bold text-muted-foreground">
+            <span className="flex items-center gap-1.5 rounded-xl border border-border bg-card/70 px-3 py-1.5 text-xs font-bold text-muted-foreground">
               <Warehouse className="size-3.5 text-accent" />
               <span>{currentItem.warehouseBranch}</span>
             </span>
@@ -185,37 +197,37 @@ export function ProductSlide({
             )}
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* Slide Index Indicator */}
-            <div className="rounded-xl border border-border bg-card/70 px-3 py-1 text-xs font-black tabular-nums text-foreground">
+          <div className="flex items-center gap-2">
+            {/* מונה שקופיות */}
+            <div className="rounded-xl border border-border bg-card/80 px-3 py-1.5 text-xs font-black tabular-nums text-foreground shadow-sm">
               {currentIndex + 1} / {items.length}
             </div>
 
-            {/* Play/Pause Button */}
+            {/* לחצן הפעלה / השהיה */}
             <button
               onClick={togglePause}
-              className="flex items-center gap-1.5 rounded-xl border border-border bg-card/70 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-secondary hover:text-primary transition-all shadow-sm"
+              className="flex items-center gap-1.5 rounded-xl border border-border bg-card/80 px-3 py-1.5 text-xs font-bold text-foreground hover:bg-secondary hover:text-primary transition active:scale-95 shadow-sm"
               title={isPaused ? "המשך סבב" : "עצור סבב שקופיות"}
               id="btn-toggle-carousel-pause"
             >
               {isPaused ? (
                 <>
-                  <Play className="size-3.5 text-emerald-400" />
+                  <Play className="size-3.5 text-emerald-400 fill-emerald-400" />
                   <span>המשך</span>
                 </>
               ) : (
                 <>
-                  <Pause className="size-3.5 text-amber-400" />
+                  <Pause className="size-3.5 text-amber-400 fill-amber-400" />
                   <span>השהה</span>
                 </>
               )}
             </button>
 
-            {/* Manual Navigation Arrows */}
+            {/* לחצני חיצים ידניים */}
             <div className="flex items-center gap-1">
               <button
                 onClick={handlePrev}
-                className="grid size-8 place-items-center rounded-xl border border-border bg-card/80 text-foreground hover:bg-primary hover:text-primary-foreground transition-all shadow-sm"
+                className="grid size-9 place-items-center rounded-xl border border-border bg-card/80 text-foreground hover:bg-primary hover:text-primary-foreground transition active:scale-95 shadow-sm"
                 title="מוצר קודם"
                 aria-label="מוצר קודם"
               >
@@ -223,7 +235,7 @@ export function ProductSlide({
               </button>
               <button
                 onClick={handleNext}
-                className="grid size-8 place-items-center rounded-xl border border-border bg-card/80 text-foreground hover:bg-primary hover:text-primary-foreground transition-all shadow-sm"
+                className="grid size-9 place-items-center rounded-xl border border-border bg-card/80 text-foreground hover:bg-primary hover:text-primary-foreground transition active:scale-95 shadow-sm"
                 title="מוצר הבא"
                 aria-label="מוצר הבא"
               >
@@ -233,102 +245,107 @@ export function ProductSlide({
           </div>
         </div>
 
-        {/* Dynamic Dwell Progress Bar */}
+        {/* פס התקדמות מעבר השקופית */}
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/50">
           <motion.div
             className={cn(
               "h-full rounded-full transition-all duration-100",
-              isPaused ? "bg-amber-500/50" : "bg-primary",
+              isPaused ? "bg-amber-500/60" : "bg-primary"
             )}
             style={{ width: `${progress}%` }}
           />
         </div>
       </div>
 
-      {/* Main Slide Content with Animated Presence */}
+      {/* אזור תוכן מרכזי עם אנימציית Fade + Slide */}
       <div className="relative my-auto py-6">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={currentItem.sku + currentItem.cleanName}
-            initial={{ opacity: 0, x: direction * 40 }}
+            initial={{ opacity: 0, x: direction * 35 }}
             animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: direction * -40 }}
+            exit={{ opacity: 0, x: direction * -35 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center"
           >
-            {/* Right Column: Hero Visual & Specs (5 Cols in RTL) */}
+            {/* עמודה ימנית: כרטיס תמונה חזותי ופרטי אריזה */}
             <div className="lg:col-span-5 flex flex-col gap-4">
               <div className="group relative overflow-hidden rounded-3xl border border-border/80 bg-card/50 shadow-xl aspect-video lg:aspect-[4/3] flex items-center justify-center">
-                <img
-                  src={currentItem.imageUrl}
-                  alt={currentItem.cleanName}
-                  className="h-full w-full object-cover object-center transition-transform duration-700 group-hover:scale-105"
-                  referrerPolicy="no-referrer"
-                  loading="eager"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent" />
+                {!hasImageFailed && currentItem.imageUrl ? (
+                  <img
+                    src={currentItem.imageUrl}
+                    alt={currentItem.cleanName}
+                    onError={() =>
+                      setImageErrorMap((prev) => ({ ...prev, [currentItem.sku]: true }))
+                    }
+                    className="h-full w-full object-cover object-center transition-transform duration-700 group-hover:scale-105"
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-muted-foreground p-6 text-center">
+                    <div className="grid size-16 place-items-center rounded-2xl bg-secondary/60 border border-border mb-2">
+                      <ImageIcon className="size-8 opacity-50" />
+                    </div>
+                    <span className="text-xs font-bold text-foreground/80">{currentItem.cleanName}</span>
+                    <span className="text-[11px] opacity-60">חומרי בניין ח. סבן</span>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent pointer-events-none" />
 
-                {/* SKU Badge Floating */}
-                <div className="absolute top-4 right-4 flex items-center gap-2 rounded-2xl border border-white/20 bg-black/60 px-4 py-2 text-sm font-black text-white backdrop-blur-md shadow-lg">
+                {/* תגית מק"ט צפה */}
+                <div className="absolute top-4 right-4 flex items-center gap-2 rounded-2xl border border-white/20 bg-black/65 px-3.5 py-1.5 text-xs font-black text-white backdrop-blur-md shadow-lg">
                   <Package className="size-4 text-primary" />
                   <span>מק״ט: {currentItem.sku}</span>
                 </div>
 
-                {/* Units per Pallet Info Floating */}
-                <div className="absolute bottom-4 right-4 left-4 flex items-center justify-between text-white/90 text-xs font-bold">
-                  <span className="flex items-center gap-1.5 rounded-xl bg-black/60 px-3 py-1.5 backdrop-blur-sm">
+                {/* תגית אריזה וסטטוס בתחתית התמונה */}
+                <div className="absolute bottom-4 right-4 left-4 flex items-center justify-between text-white/95 text-xs font-bold">
+                  <span className="flex items-center gap-1.5 rounded-xl bg-black/65 px-3 py-1.5 backdrop-blur-sm border border-white/10">
                     <Layers className="size-3.5 text-accent" />
                     <span>
                       {currentItem.unitsPerPallet} {currentItem.unit} במשטח מלא
                     </span>
                   </span>
 
-                  <span
-                    className={cn(
-                      "rounded-xl px-3 py-1.5 font-black border backdrop-blur-sm",
-                      statusBadgeColor,
-                    )}
-                  >
+                  <span className={cn("rounded-xl px-3 py-1.5 font-black border backdrop-blur-sm", statusBadgeColor)}>
                     {isCritical ? "רצפה קריטית" : isWarning ? "אזהרת מלאי" : "מלאי תקין"}
                   </span>
                 </div>
               </div>
 
-              {/* Baseline & Safety Stock Mini Summary */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center">
-                  <span className="text-xs font-medium text-muted-foreground">בסיס פתיחת יום</span>
+              {/* נתוני בסיס יומיים */}
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center shadow-sm">
+                  <span className="text-[11px] font-medium text-muted-foreground">בסיס פתיחה</span>
                   <span className="text-xl font-black text-foreground tabular-nums">
-                    {currentItem.initialBase}
+                    {currentItem.initialBase.toLocaleString()}
                   </span>
                   <span className="text-[10px] text-muted-foreground">{currentItem.unit}</span>
                 </div>
 
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center">
-                  <span className="text-xs font-medium text-muted-foreground">סף ביטחון רצפה</span>
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center shadow-sm">
+                  <span className="text-[11px] font-medium text-muted-foreground">סף ביטחון</span>
                   <span className="text-xl font-black text-amber-500 tabular-nums">
-                    {currentItem.safetyThreshold}
+                    {currentItem.safetyThreshold.toLocaleString()}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {currentItem.unit} מינימום
-                  </span>
+                  <span className="text-[10px] text-muted-foreground">מינימום ברצפה</span>
                 </div>
 
-                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center">
-                  <span className="text-xs font-medium text-muted-foreground">הזמנות יומיות</span>
+                <div className="flex flex-col items-center justify-center rounded-2xl border border-border/70 bg-card/60 p-3 text-center shadow-sm">
+                  <span className="text-[11px] font-medium text-muted-foreground">הזמנות יומיות</span>
                   <span className="text-xl font-black text-primary tabular-nums">
                     {currentItem.ordersCount}
                   </span>
-                  <span className="text-[10px] text-muted-foreground">הזמנות שמשכו פריט</span>
+                  <span className="text-[10px] text-muted-foreground">שמשכו חומר זה</span>
                 </div>
               </div>
             </div>
 
-            {/* Left Column: Live Metrics, Progress Bar, Procurement Advice (7 Cols in RTL) */}
+            {/* עמודה שמאלית: מדדי משיכה חיים, פרוגרס בר והמלצות רכש */}
             <div className="lg:col-span-7 flex flex-col gap-6">
-              {/* Product Title & Brand */}
               <div>
-                <div className="flex items-center gap-3 mb-1.5">
+                <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-bold text-muted-foreground">
                     חומרי בניין ח. סבן · מגרש הפצה חי
                   </span>
@@ -341,37 +358,37 @@ export function ProductSlide({
                 </h2>
               </div>
 
-              {/* Primary Live Metrics Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {/* Metric 1: Actual Drawn */}
+              {/* גריד מדדי משיכה מרכזיים */}
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3.5">
+                {/* מדד 1: נמשך בפועל היום */}
                 <div className="flex flex-col rounded-2xl border border-border/80 bg-card/70 p-4 shadow-sm">
                   <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground mb-1">
                     <span>נמשך בפועל היום</span>
                     <Truck className="size-4 text-emerald-500" />
                   </div>
                   <div className="text-3xl md:text-4xl font-black text-emerald-500 tabular-nums">
-                    {currentItem.actualDrawn}
+                    {currentItem.actualDrawn.toLocaleString()}
                   </div>
                   <span className="text-xs text-muted-foreground mt-1">
                     {currentItem.unit} (הועמס / יצא / סופק)
                   </span>
                 </div>
 
-                {/* Metric 2: Reserved in Preparation */}
+                {/* מדד 2: משוריין בהכנה */}
                 <div className="flex flex-col rounded-2xl border border-border/80 bg-card/70 p-4 shadow-sm">
                   <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground mb-1">
                     <span>משוריין בהכנה</span>
                     <Package className="size-4 text-amber-500" />
                   </div>
                   <div className="text-3xl md:text-4xl font-black text-amber-500 tabular-nums">
-                    {currentItem.reserved}
+                    {currentItem.reserved.toLocaleString()}
                   </div>
                   <span className="text-xs text-muted-foreground mt-1">
                     {currentItem.unit} (בסידור וליקוט פעיל)
                   </span>
                 </div>
 
-                {/* Metric 3: Effective Floor Balance */}
+                {/* מדד 3: יתרת רצפה אפקטיבית */}
                 <div
                   className={cn(
                     "col-span-2 md:col-span-1 flex flex-col rounded-2xl border p-4 shadow-md",
@@ -379,7 +396,7 @@ export function ProductSlide({
                       ? "border-rose-500/50 bg-rose-500/10"
                       : isWarning
                         ? "border-amber-500/50 bg-amber-500/10"
-                        : "border-emerald-500/50 bg-emerald-500/10",
+                        : "border-emerald-500/50 bg-emerald-500/10"
                   )}
                 >
                   <div className="flex items-center justify-between text-xs font-bold text-foreground mb-1">
@@ -393,14 +410,10 @@ export function ProductSlide({
                   <div
                     className={cn(
                       "text-3xl md:text-4xl font-black tabular-nums",
-                      isCritical
-                        ? "text-rose-400"
-                        : isWarning
-                          ? "text-amber-400"
-                          : "text-emerald-400",
+                      isCritical ? "text-rose-400" : isWarning ? "text-amber-400" : "text-emerald-400"
                     )}
                   >
-                    {currentItem.effectiveBalance}
+                    {currentItem.effectiveBalance.toLocaleString()}
                   </div>
                   <span className="text-xs text-muted-foreground mt-1">
                     {currentItem.unit} נותרו במגרש ({currentItem.percentRemaining}%)
@@ -408,18 +421,14 @@ export function ProductSlide({
                 </div>
               </div>
 
-              {/* Graphical Progress Bar: Remaining Floor Stock */}
+              {/* מד התקדמות גרפי מותאם RTL */}
               <div className="flex flex-col gap-2 rounded-2xl border border-border/80 bg-card/60 p-4 shadow-sm">
                 <div className="flex items-center justify-between text-sm font-bold">
                   <span className="text-muted-foreground">רמת מלאי רצפה נוכחית:</span>
                   <span
                     className={cn(
                       "font-black tabular-nums text-base",
-                      isCritical
-                        ? "text-rose-400"
-                        : isWarning
-                          ? "text-amber-400"
-                          : "text-emerald-400",
+                      isCritical ? "text-rose-400" : isWarning ? "text-amber-400" : "text-emerald-400"
                     )}
                   >
                     {currentItem.percentRemaining}% נותרו
@@ -433,36 +442,34 @@ export function ProductSlide({
                     animate={{ width: `${currentItem.percentRemaining}%` }}
                     transition={{ duration: 0.8, ease: "easeOut" }}
                   />
-                  {/* Safety Stock Marker on progress bar */}
+                  {/* קו סף ביטחון מותאם לימין (RTL) */}
                   <div
-                    className="absolute top-0 bottom-0 w-0.5 bg-foreground/70 z-10"
+                    className="absolute top-0 bottom-0 w-0.5 bg-foreground/80 z-10 shadow"
                     style={{
-                      left: `${Math.round((currentItem.safetyThreshold / currentItem.initialBase) * 100)}%`,
+                      right: `${Math.min(100, Math.round((currentItem.safetyThreshold / (currentItem.initialBase || 1)) * 100))}%`,
                     }}
                     title={`סף ביטחון: ${currentItem.safetyThreshold} ${currentItem.unit}`}
                   />
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>0 יח׳ (אזל)</span>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold">
+                  <span>בסיס מלא: {currentItem.initialBase.toLocaleString()} {currentItem.unit}</span>
                   <span className="font-bold text-amber-500">
-                    קו סף ביטחון: {currentItem.safetyThreshold} {currentItem.unit}
+                    קו סף ביטחון: {currentItem.safetyThreshold.toLocaleString()} {currentItem.unit}
                   </span>
-                  <span>
-                    בסיס מלא: {currentItem.initialBase} {currentItem.unit}
-                  </span>
+                  <span>0 יח׳ (אזל)</span>
                 </div>
               </div>
 
-              {/* Automated Procurement Insight Card (תובנת רכש אוטומטית) */}
+              {/* כרטיסיית המלצת רכש חכמה ו-WhatsApp Push */}
               <div
                 className={cn(
                   "flex flex-col md:flex-row items-start md:items-center justify-between gap-4 rounded-2xl border p-5 shadow-lg",
                   isCritical
-                    ? "border-rose-500/60 bg-gradient-to-r from-rose-950/40 via-rose-900/20 to-card"
+                    ? "border-rose-500/60 bg-gradient-to-l from-rose-950/40 via-rose-900/20 to-card"
                     : isWarning
-                      ? "border-amber-500/60 bg-gradient-to-r from-amber-950/40 via-amber-900/20 to-card"
-                      : "border-emerald-500/50 bg-gradient-to-r from-emerald-950/30 via-emerald-900/10 to-card",
+                      ? "border-amber-500/60 bg-gradient-to-l from-amber-950/40 via-amber-900/20 to-card"
+                      : "border-emerald-500/50 bg-gradient-to-l from-emerald-950/30 via-emerald-900/10 to-card"
                 )}
               >
                 <div className="flex items-start gap-3.5">
@@ -473,7 +480,7 @@ export function ProductSlide({
                         ? "bg-rose-500 text-white"
                         : isWarning
                           ? "bg-amber-500 text-slate-950"
-                          : "bg-emerald-500 text-white",
+                          : "bg-emerald-500 text-white"
                     )}
                   >
                     {currentItem.requiresFullTrailer ? (
@@ -499,7 +506,7 @@ export function ProductSlide({
                       {currentItem.procurementAdvice}
                       {currentItem.deficitToRefill > 0 && (
                         <span className="font-bold text-foreground mr-1">
-                          (חוסר של {currentItem.deficitToRefill} {currentItem.unit} /{" "}
+                          (חוסר של {currentItem.deficitToRefill.toLocaleString()} {currentItem.unit} /{" "}
                           {currentItem.palletsToRefill} משטחים)
                         </span>
                       )}
@@ -507,12 +514,12 @@ export function ProductSlide({
                   </div>
                 </div>
 
-                {/* Direct WhatsApp Action Button */}
+                {/* כפתור שליחה מהיר לרכש */}
                 <a
                   href={waUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 text-xs font-black shadow-md transition hover:scale-105 shrink-0"
+                  className="flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 text-xs font-black shadow-md transition hover:scale-105 active:scale-95 shrink-0"
                   title="שליחת דרישת רכש עבור פריט זה לוואטסאפ"
                 >
                   <Share2 className="size-4" />
@@ -524,7 +531,7 @@ export function ProductSlide({
         </AnimatePresence>
       </div>
 
-      {/* Bottom Thumbnail Strip / Dots for Rapid Navigation */}
+      {/* סרגל ניווט תחתון מהיר */}
       <div className="flex items-center justify-between gap-4 pt-4 border-t border-border/60">
         <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none max-w-2xl">
           {items.map((item, idx) => {
@@ -543,7 +550,7 @@ export function ProductSlide({
                     ? "bg-primary text-primary-foreground border-primary shadow-sm scale-105"
                     : item.isCritical
                       ? "bg-rose-500/15 text-rose-400 border-rose-500/30 hover:bg-rose-500/25"
-                      : "bg-card/70 text-muted-foreground border-border hover:bg-secondary hover:text-foreground",
+                      : "bg-card/70 text-muted-foreground border-border hover:bg-secondary hover:text-foreground"
                 )}
                 title={`${item.cleanName} (${item.sku})`}
               >
@@ -556,7 +563,6 @@ export function ProductSlide({
           })}
         </div>
 
-        {/* Status Hint */}
         <div className="hidden md:flex items-center gap-2 text-xs font-semibold text-muted-foreground">
           <span>מקשים: ◄ ► למעבר · רווח להשהיה</span>
           {isPaused && (
