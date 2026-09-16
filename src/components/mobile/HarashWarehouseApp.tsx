@@ -6,21 +6,15 @@ import {
   Package,
   Boxes,
   AlertTriangle,
-  CheckCircle2,
-  Share2,
   RotateCcw,
   Plus,
   Minus,
   Layers,
-  Scale,
   Sun,
   Moon,
-  Send,
   X,
-  Clock,
   MapPin,
-  ChevronDown,
-  ChevronUp,
+  Share2,
 } from "lucide-react";
 import type { Order } from "@/types/dispatch";
 import { cn } from "@/lib/utils";
@@ -32,15 +26,14 @@ interface HarashWarehouseAppProps {
   isRefreshing?: boolean;
 }
 
-// נתוני ספק בית הטיט
-const BEIT_HATIT_PHONE = "972500000000"; // יש לעדכן למספר הישיר של הספק
+const BEIT_HATIT_PHONE = "972500000000";
 
 interface TruckDraft {
-  sandBags: number;      // בלות חול
-  sumsumBags: number;    // בלות סומסום
-  titBags: number;       // בלות טיט
-  sandSmallPallets: number;   // משטחי שקיות חול (70 יח' למשטח)
-  sumsumSmallPallets: number; // משטחי שקיות סומסום (70 יח' למשטח)
+  sandBags: number;
+  sumsumBags: number;
+  titBags: number;
+  sandSmallPallets: number;
+  sumsumSmallPallets: number;
 }
 
 interface InventoryState {
@@ -58,7 +51,6 @@ export function HarashWarehouseApp({
   onRefresh,
   isRefreshing = false,
 }: HarashWarehouseAppProps) {
-  // מצב תמה בהיר/כהה
   const [isDark, setIsDark] = useState<boolean>(() => {
     if (typeof window !== "undefined") {
       return document.documentElement.classList.contains("dark");
@@ -84,19 +76,19 @@ export function HarashWarehouseApp({
 
   const [activeTab, setActiveTab] = useState<"orders" | "truck_builder" | "stock">("orders");
 
-  // סינון קשיח אך ורק להזמנות של מחסן 4 החרש
+  // סינון קשיח למחסן 4 החרש
   const harashOrders = useMemo(() => {
-    return (orders || []).filter((o) => {
-      const w = o.warehouse || o.branch || "";
+    const list = Array.isArray(orders) ? orders : [];
+    return list.filter((o) => {
+      const w = String(o?.warehouse || (o as any)?.branch || "");
       return w.includes("החרש") || w.includes("4");
     });
   }, [orders]);
 
-  // סיווג הזמנות לפי סטטוס ליקוט
   const pickingOrders = useMemo(() => {
     return harashOrders.filter((o) =>
-      ["בסידור עבודה", "בהכנה", "בהמתנה"].some(
-        (st) => o?.status?.trim() === st || o?.stage?.trim() === st
+      ["בסידור עבודה", "בהכנה", "ממתין", "בהמתנה"].some(
+        (st) => o?.status?.trim() === st || (o as any)?.stage?.trim() === st
       )
     );
   }, [harashOrders]);
@@ -104,12 +96,11 @@ export function HarashWarehouseApp({
   const readyOrders = useMemo(() => {
     return harashOrders.filter((o) =>
       ["מוכן להעמסה", "בהעמסה", "יצא לדרך"].some(
-        (st) => o?.status?.trim() === st || o?.stage?.trim() === st
+        (st) => o?.status?.trim() === st || (o as any)?.stage?.trim() === st
       )
     );
   }, [harashOrders]);
 
-  // ניהול מלאי רצפה ידני ודינמי
   const [floorStock, setFloorStock] = useState<InventoryState>({
     sandBags: 18,
     sumsumBags: 14,
@@ -119,7 +110,6 @@ export function HarashWarehouseApp({
     blocks10: 200,
   });
 
-  // טיוטת הרכבת משאית מול בית הטיט
   const [truckDraft, setTruckDraft] = useState<TruckDraft>({
     sandBags: 0,
     sumsumBags: 0,
@@ -128,7 +118,8 @@ export function HarashWarehouseApp({
     sumsumSmallPallets: 0,
   });
 
-  // התראת Popup מיידית בהזמנה של 10 בלות סומסום ומעלה
+  // מזהי הזמנות שכבר טופלו או נסגרו - מונע לולאת תקיעה
+  const [dismissedAlertOrderIds, setDismissedAlertOrderIds] = useState<Set<string>>(new Set());
   const [activeAlert, setActiveAlert] = useState<{
     orderId: string;
     client: string;
@@ -136,29 +127,51 @@ export function HarashWarehouseApp({
   } | null>(null);
 
   useEffect(() => {
-    harashOrders.forEach((order) => {
-      const summary = order.productsSummary || "";
-      // חיפוש כמות של בלות סומסום בטקסט
-      const match = summary.match(/([0-9]+)\s*(?:בלות|בלה|שק גדול)?\s*סומסום/);
+    if (activeAlert) return; // לא מפעיל בדיקה אם יש התראה פעילה
+
+    for (const order of harashOrders) {
+      const orderId = String(order?.orderId || (order as any)?.id || "");
+      if (!orderId || dismissedAlertOrderIds.has(orderId)) continue;
+
+      const itemsText = Array.isArray(order?.items)
+        ? order.items.map((i) => i?.name || "").join(" ")
+        : "";
+      const rawSummary = `${itemsText} ${(order as any)?.productsSummary || ""} ${(order as any)?.itemsFormatted || ""}`;
+      const match = rawSummary.match(/([0-9]+)\s*(?:בלות|בלה|שק גדול)?\s*סומסום/);
+
       if (match) {
         const count = parseInt(match[1], 10);
-        if (count >= 10 && (!activeAlert || activeAlert.orderId !== order.id)) {
+        if (count >= 10) {
           setActiveAlert({
-            orderId: order.id,
-            client: order.client || "לקוח",
+            orderId,
+            client: order?.customerName || (order as any)?.client || "לקוח",
             sumsumCount: count,
           });
+          break;
         }
       }
-    });
-  }, [harashOrders]);
+    }
+  }, [harashOrders, dismissedAlertOrderIds, activeAlert]);
 
-  // חישוב קיבולת משאית בית הטיט (עד 30 בלות)
+  const handleDismissAlert = (orderId: string) => {
+    setDismissedAlertOrderIds((prev) => new Set(prev).add(orderId));
+    setActiveAlert(null);
+  };
+
+  const handleAddBalesToDraft = (orderId: string, count: number) => {
+    setTruckDraft((prev) => ({
+      ...prev,
+      sumsumBags: prev.sumsumBags + count,
+    }));
+    setDismissedAlertOrderIds((prev) => new Set(prev).add(orderId));
+    setActiveAlert(null);
+    setActiveTab("truck_builder");
+  };
+
   const totalDraftBags = truckDraft.sandBags + truckDraft.sumsumBags + truckDraft.titBags;
   const totalSmallPallets = truckDraft.sandSmallPallets + truckDraft.sumsumSmallPallets;
   const isFullTruck = totalDraftBags >= 30;
 
-  // הפקת הודעת וואטסאפ לבית הטיט
   const sendBeitHatitWhatsApp = () => {
     const text = [
       `*הזמנת אספקה — ח.סבן (מחסן 4 החרש)*`,
@@ -179,12 +192,13 @@ export function HarashWarehouseApp({
       .join("\n");
 
     const url = `https://wa.me/${BEIT_HATIT_PHONE}?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
   };
 
   return (
-    <div dir="rtl" className="flex flex-col h-screen w-full select-none overflow-hidden bg-background text-foreground">
-      {/* Header עליון ייעודי למחסן 4 */}
+    <div dir="rtl" className="flex flex-col h-screen w-full select-none overflow-hidden bg-background text-foreground font-sans">
       <header className="sticky top-0 z-30 flex flex-col border-b border-border/80 bg-card/95 px-4 pt-3 pb-2.5 backdrop-blur-xl shadow-md">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -205,6 +219,7 @@ export function HarashWarehouseApp({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={toggleTheme}
               className={cn(
                 "h-10 px-3 flex items-center gap-1.5 rounded-xl border font-black text-xs transition active:scale-95 shadow-sm",
@@ -216,6 +231,7 @@ export function HarashWarehouseApp({
             </button>
 
             <button
+              type="button"
               onClick={onRefresh}
               disabled={isRefreshing}
               className="grid size-10 place-items-center rounded-xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm"
@@ -226,7 +242,6 @@ export function HarashWarehouseApp({
           </div>
         </div>
 
-        {/* מחווני רכב קבועים בחצר */}
         <div className="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-border/60 text-[11px] font-bold">
           <div className="flex items-center justify-between rounded-xl bg-secondary/50 px-2.5 py-1.5 border border-border/50">
             <span className="text-muted-foreground">חכמת (מרצדס מנוף):</span>
@@ -239,60 +254,59 @@ export function HarashWarehouseApp({
         </div>
       </header>
 
-      {/* Popup התרעה דחופה למשיכת 10 בלות סומסום */}
+      {/* Popup התרעה דחופה ל-10 בלות סומסום - עם מנגנון שחרור מלא */}
       <AnimatePresence>
         {activeAlert && (
-          <motion.div
-            initial={{ opacity: 0, y: -50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -50 }}
-            className="fixed top-20 inset-x-4 z-50 rounded-3xl border-2 border-rose-500 bg-rose-950/90 p-4 text-white shadow-2xl backdrop-blur-xl"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <AlertTriangle className="size-7 text-rose-400 animate-bounce shrink-0" />
-                <div>
-                  <h2 className="text-base font-black text-rose-200">
-                    התראת עומס משיכה — 10 בלות סומסום!
-                  </h2>
-                  <p className="text-xs font-semibold text-white/90 mt-0.5">
-                    הזמנה #{activeAlert.orderId} עבור {activeAlert.client} כוללת {activeAlert.sumsumCount} בלות סומסום.
-                  </p>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-sm rounded-3xl border-2 border-rose-500 bg-rose-950 p-5 text-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="size-7 text-rose-400 animate-bounce shrink-0" />
+                  <div>
+                    <h2 className="text-sm font-black text-rose-200 leading-snug">
+                      התראת עומס משיכה — 10 בלות סומסום!
+                    </h2>
+                    <p className="text-xs font-semibold text-white/90 mt-1">
+                      הזמנה #{activeAlert.orderId} עבור {activeAlert.client} כוללת {activeAlert.sumsumCount} בלות סומסום.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleDismissAlert(activeAlert.orderId)}
+                  className="grid size-8 place-items-center rounded-xl bg-white/10 text-white/80 hover:bg-white/20 active:scale-90"
+                >
+                  <X className="size-4" />
+                </button>
               </div>
-              <button
-                onClick={() => setActiveAlert(null)}
-                className="grid size-7 place-items-center rounded-lg bg-white/10 text-white/80"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
 
-            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-rose-500/40">
-              <button
-                onClick={() => {
-                  setTruckDraft((prev) => ({ ...prev, sumsumBags: prev.sumsumBags + activeAlert.sumsumCount }));
-                  setActiveAlert(null);
-                  setActiveTab("truck_builder");
-                }}
-                className="flex-1 h-9 rounded-xl bg-white text-slate-950 font-black text-xs shadow-md active:scale-95"
-              >
-                הוסף {activeAlert.sumsumCount} בלות למשאית בית הטיט
-              </button>
-              <button
-                onClick={() => setActiveAlert(null)}
-                className="h-9 px-3 rounded-xl bg-white/15 text-white font-bold text-xs"
-              >
-                התעלם כעת
-              </button>
-            </div>
-          </motion.div>
+              <div className="flex flex-col gap-2 mt-4 pt-3 border-t border-rose-500/40">
+                <button
+                  type="button"
+                  onClick={() => handleAddBalesToDraft(activeAlert.orderId, activeAlert.sumsumCount)}
+                  className="w-full h-11 rounded-xl bg-white text-slate-950 font-black text-xs shadow-lg active:scale-95 transition"
+                >
+                  הוסף {activeAlert.sumsumCount} בלות למשאית בית הטיט
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDismissAlert(activeAlert.orderId)}
+                  className="w-full h-10 rounded-xl bg-white/15 text-white font-bold text-xs hover:bg-white/20 active:scale-95 transition"
+                >
+                  התעלם וסגור
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
-      {/* אזור תוכן מרכזי */}
       <main className="flex-1 overflow-y-auto px-4 py-3 pb-24">
-        {/* טאב 1: הזמנות מחסן 4 וסידור עבודה */}
         {activeTab === "orders" && (
           <div className="flex flex-col gap-3.5">
             <div className="flex items-center justify-between text-xs font-black text-muted-foreground px-1">
@@ -306,18 +320,20 @@ export function HarashWarehouseApp({
                 <p className="font-bold">אין הזמנות פעילות למחסן 4 החרש כרגע</p>
               </div>
             ) : (
-              harashOrders.map((order) => (
-                <HarashOrderCard
-                  key={order.id}
-                  order={order}
-                  onAdvanceStatus={(status) => onUpdateOrderStatus?.(order.id, status)}
-                />
-              ))
+              harashOrders.map((order) => {
+                const oId = String(order?.orderId || (order as any)?.id || "");
+                return (
+                  <HarashOrderCard
+                    key={oId}
+                    order={order}
+                    onAdvanceStatus={(status) => onUpdateOrderStatus?.(oId, status)}
+                  />
+                );
+              })
             )}
           </div>
         )}
 
-        {/* טאב 2: כלי הרכבת משאית מול ספק בית הטיט */}
         {activeTab === "truck_builder" && (
           <div className="flex flex-col gap-4">
             <div className="rounded-3xl border border-border/80 bg-card p-4 shadow-sm">
@@ -331,7 +347,6 @@ export function HarashWarehouseApp({
                 </span>
               </div>
 
-              {/* מד קיבולת בלות */}
               <div className="mt-3">
                 <div className="flex justify-between text-xs font-bold mb-1.5">
                   <span className="text-muted-foreground">תפוסת בלות במשאית:</span>
@@ -351,19 +366,20 @@ export function HarashWarehouseApp({
               </div>
             </div>
 
-            {/* לחצני הוספת בלות */}
             <div className="grid grid-cols-3 gap-2.5">
               <div className="rounded-2xl border border-border bg-card p-3 text-center flex flex-col justify-between">
                 <span className="text-xs font-bold text-muted-foreground">בלות חול</span>
                 <span className="text-2xl font-black text-foreground my-1">{truckDraft.sandBags}</span>
                 <div className="flex items-center justify-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, sandBags: Math.max(0, p.sandBags - 1) }))}
                     className="size-8 rounded-lg bg-secondary grid place-items-center"
                   >
                     <Minus className="size-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, sandBags: p.sandBags + 1 }))}
                     className="size-8 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
                   >
@@ -377,12 +393,14 @@ export function HarashWarehouseApp({
                 <span className="text-2xl font-black text-foreground my-1">{truckDraft.sumsumBags}</span>
                 <div className="flex items-center justify-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: Math.max(0, p.sumsumBags - 1) }))}
                     className="size-8 rounded-lg bg-secondary grid place-items-center"
                   >
                     <Minus className="size-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: p.sumsumBags + 1 }))}
                     className="size-8 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
                   >
@@ -396,12 +414,14 @@ export function HarashWarehouseApp({
                 <span className="text-2xl font-black text-foreground my-1">{truckDraft.titBags}</span>
                 <div className="flex items-center justify-center gap-2">
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, titBags: Math.max(0, p.titBags - 1) }))}
                     className="size-8 rounded-lg bg-secondary grid place-items-center"
                   >
                     <Minus className="size-4" />
                   </button>
                   <button
+                    type="button"
                     onClick={() => setTruckDraft((p) => ({ ...p, titBags: p.titBags + 1 }))}
                     className="size-8 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
                   >
@@ -411,7 +431,6 @@ export function HarashWarehouseApp({
               </div>
             </div>
 
-            {/* הוספת משטחי שקיות (70 שקיות למשטח) */}
             <div className="rounded-3xl border border-border/80 bg-card p-4 shadow-sm">
               <span className="text-xs font-black text-muted-foreground block mb-2">
                 משטחי שקיות (אריזת יצרן: 70 שקיות למשטח):
@@ -424,6 +443,7 @@ export function HarashWarehouseApp({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: Math.max(0, p.sandSmallPallets - 1) }))}
                       className="size-7 rounded-lg bg-secondary grid place-items-center"
                     >
@@ -431,6 +451,7 @@ export function HarashWarehouseApp({
                     </button>
                     <span className="font-black text-sm">{truckDraft.sandSmallPallets}</span>
                     <button
+                      type="button"
                       onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: p.sandSmallPallets + 1 }))}
                       className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center"
                     >
@@ -446,6 +467,7 @@ export function HarashWarehouseApp({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: Math.max(0, p.sumsumSmallPallets - 1) }))}
                       className="size-7 rounded-lg bg-secondary grid place-items-center"
                     >
@@ -453,6 +475,7 @@ export function HarashWarehouseApp({
                     </button>
                     <span className="font-black text-sm">{truckDraft.sumsumSmallPallets}</span>
                     <button
+                      type="button"
                       onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: p.sumsumSmallPallets + 1 }))}
                       className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center"
                     >
@@ -463,8 +486,8 @@ export function HarashWarehouseApp({
               </div>
             </div>
 
-            {/* כפתור שליחת וואטסאפ לבית הטיט */}
             <button
+              type="button"
               onClick={sendBeitHatitWhatsApp}
               disabled={totalDraftBags === 0 && totalSmallPallets === 0}
               className="h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-xl active:scale-95 transition disabled:opacity-50"
@@ -475,21 +498,20 @@ export function HarashWarehouseApp({
           </div>
         )}
 
-        {/* טאב 3: מונה מלאי רצפה דינמי ומתאפס */}
         {activeTab === "stock" && (
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between rounded-2xl bg-card border border-border/80 p-3 shadow-sm">
               <span className="text-xs font-black">ספירת מלאי רצפה מחסן 4</span>
               <button
+                type="button"
                 onClick={() => {
-                  // קבלת משאית מלאה מבית הטיט (איפוס ועדכון מהיר)
                   setFloorStock((p) => ({
                     ...p,
                     sandBags: p.sandBags + 15,
                     sumsumBags: p.sumsumBags + 15,
                   }));
                 }}
-                className="h-8 px-3 rounded-xl bg-primary text-primary-foreground font-bold text-xs"
+                className="h-8 px-3 rounded-xl bg-primary text-primary-foreground font-bold text-xs active:scale-95"
               >
                 + קליטת משאית (30 בלות)
               </button>
@@ -529,10 +551,10 @@ export function HarashWarehouseApp({
         )}
       </main>
 
-      {/* ניווט תחתון קבוע לאורן ותמיר */}
       <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-border/80 bg-card/95 backdrop-blur-2xl px-4 py-2 shadow-2xl">
         <div className="grid grid-cols-3 gap-3 max-w-md mx-auto">
           <button
+            type="button"
             onClick={() => setActiveTab("orders")}
             className={cn(
               "flex flex-col items-center justify-center h-14 rounded-2xl font-black text-xs transition active:scale-95",
@@ -544,6 +566,7 @@ export function HarashWarehouseApp({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab("truck_builder")}
             className={cn(
               "flex flex-col items-center justify-center h-14 rounded-2xl font-black text-xs transition active:scale-95 relative",
@@ -560,6 +583,7 @@ export function HarashWarehouseApp({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab("stock")}
             className={cn(
               "flex flex-col items-center justify-center h-14 rounded-2xl font-black text-xs transition active:scale-95",
@@ -575,7 +599,6 @@ export function HarashWarehouseApp({
   );
 }
 
-// כרטיס הזמנה ייעודי עם פירוק משקלים ופקדונות לפי נהג
 function HarashOrderCard({
   order,
   onAdvanceStatus,
@@ -583,11 +606,21 @@ function HarashOrderCard({
   order: Order;
   onAdvanceStatus: (status: string) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const isHikmat = String(order?.driver || "").includes("חכמת");
+  const isAli = String(order?.driver || "").includes("עלי");
 
-  // זיהוי משאית ומגבלות
-  const isHikmat = order.driver?.includes("חכמת");
-  const isAli = order.driver?.includes("עלי");
+  const orderId = String(order?.orderId || (order as any)?.id || "");
+  const clientName = order?.customerName || (order as any)?.client || "לקוח כללי";
+  const orderTime = order?.targetTime || (order as any)?.time || "היום";
+  const destination = order?.city || (order as any)?.destination || "איסוף עצמי";
+
+  const productsSummary = useMemo(() => {
+    if ((order as any)?.productsSummary) return (order as any).productsSummary;
+    if (Array.isArray(order?.items) && order.items.length > 0) {
+      return order.items.map((i) => `${i.quantity} ${i.name}`).join(", ");
+    }
+    return (order as any)?.itemsFormatted || "אין פירוט פריטים";
+  }, [order]);
 
   return (
     <div className="overflow-hidden rounded-3xl border border-border/80 bg-card p-4 shadow-sm">
@@ -595,11 +628,11 @@ function HarashOrderCard({
         <div>
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded-md">
-              #{order.id}
+              #{orderId}
             </span>
-            <span className="text-xs font-bold text-muted-foreground">{order.time || "היום"}</span>
+            <span className="text-xs font-bold text-muted-foreground">{orderTime}</span>
           </div>
-          <h3 className="text-base font-black text-foreground mt-1">{order.client || "לקוח כללי"}</h3>
+          <h3 className="text-base font-black text-foreground mt-1">{clientName}</h3>
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -609,27 +642,30 @@ function HarashOrderCard({
               isHikmat ? "bg-amber-500/15 text-amber-500 border-amber-500/30" : "bg-primary/15 text-primary border-primary/30"
             )}
           >
-            {order.driver || "משאית לא שובצה"}
+            {order?.driver || "טרם שובץ נהג"}
           </span>
         </div>
       </div>
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground font-semibold mt-2">
         <MapPin className="size-3.5 text-primary shrink-0" />
-        <span>{order.destination || "איסוף עצמי"}</span>
+        <span>{destination}</span>
       </div>
 
-      {/* תמצית פריטים */}
       <div className="rounded-2xl bg-secondary/35 p-2.5 my-2.5 text-xs font-bold text-foreground leading-relaxed">
-        {order.productsSummary || "אין פירוט פריטים"}
+        {productsSummary}
       </div>
 
-      {/* מגבלת משקל ופקדונות לפי נהג */}
       <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground py-1 border-t border-border/50">
         <span>
-          {isHikmat ? "מרצדס מנוף: עד 12T / בלוק 1.5T עם פקדון" : isAli ? "איסוזו פלטה: עד 5.5T (ללא פקדונות)" : "משאית רגילה"}
+          {isHikmat
+            ? "חכמת מרצדס מנוף: עד 12T / 18 בלות | בלוק 1.5T עם פקדון"
+            : isAli
+              ? "עלי איסוזו פלטה: עד 5.5T | ללא פקדונות"
+              : "משאית רגילה"}
         </span>
         <button
+          type="button"
           onClick={() => onAdvanceStatus(order.status === "מוכן להעמסה" ? "יצא לדרך" : "מוכן להעמסה")}
           className="h-8 px-3 rounded-xl bg-primary text-primary-foreground font-black text-xs active:scale-95 shadow-sm"
         >
@@ -640,7 +676,6 @@ function HarashOrderCard({
   );
 }
 
-// כרטיס מונה מלאי מהיר
 function StockCounterCard({
   label,
   count,
@@ -664,14 +699,16 @@ function StockCounterCard({
       </div>
       <div className="flex items-center justify-between gap-2">
         <button
+          type="button"
           onClick={onDecrement}
-          className="flex-1 h-9 rounded-xl bg-secondary font-bold text-xs grid place-items-center"
+          className="flex-1 h-9 rounded-xl bg-secondary font-bold text-xs grid place-items-center active:scale-95"
         >
           -{step}
         </button>
         <button
+          type="button"
           onClick={onIncrement}
-          className="flex-1 h-9 rounded-xl bg-primary text-primary-foreground font-bold text-xs grid place-items-center"
+          className="flex-1 h-9 rounded-xl bg-primary text-primary-foreground font-bold text-xs grid place-items-center active:scale-95"
         >
           +{step}
         </button>
