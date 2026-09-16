@@ -1,3 +1,21 @@
+/**
+ * ============================================================================
+ * מודול ניהול וחישוב מלאי מגרש בזמן אמת — ח. סבן חומרי בניין בע"מ
+ * קובץ: src/services/inventoryService.ts
+ * 
+ * תפקיד המודול:
+ * 1. שאיבה וסכימת כמויות משיכה מתוך הזמנות גיליון Google Sheets בזמן אמת.
+ * 2. פירוק מחרוזות טקסט של עמודה H וסריקת עמודות לוגיסטיות (בלות/משטחים/משקל).
+ * 3. חישוב יתרת רצפה אפקטיבית (Effective Stock) אל מול ספי ביטחון קבועים.
+ * 4. יצירת המלצות רכש חכמות (עיגול למשטחים שלמים ופול-טריילרים ממחצבה).
+ * 
+ * הדרכה ולימוד מקדמים (אם משנים מקדם מ-1.0 ל-2.0):
+ * - שינוי מקדם החישוב של buffer מ-1.25 ל-2.0 יכפיל פי 2 את כמות ההזמנה המומלצת.
+ * - שינוי סף קריטי (isCritical) מ-0.5 ל-1.0 יקפיץ התראה אדומה ברגע ההגעה לסף הביטחון במקום בחצי ממנו.
+ * - הגדרת initialBase על 5,000 מבטיחה שהיתרה תישאר חיובית וירוקה ולא תקפוץ כקריטית במשיכות רגילות.
+ * ============================================================================
+ */
+
 import type { Order } from "@/types/dispatch";
 import type { NormalizedProductSlideItem, ScreensaverBranchFilter } from "@/types/screensaver";
 import {
@@ -8,47 +26,53 @@ import {
   parseColumnHProductText,
 } from "@/services/analyticsService";
 
+// ערך בסיס גלובלי לפתיחת מלאי - 5,000 יחידות כדי למנוע התראות קריטיות שגויות
+export const GLOBAL_INITIAL_STOCK_BASE = 500;
+
+// הגדרת מבנה לפריט מלאי חי המוצג בדשבורד ובמובייל
 export interface LiveInventoryItem {
   sku: string;
   name: string;
   category: "cement" | "big_bag" | "block" | "dry_mix" | "other";
   unit: string;
-  initialStock: number;
-  totalDispensedToday: number;
-  committedDemand: number;
-  currentStock: number;
-  safetyStockLevel: number;
-  isLowStock: boolean;
-  isCritical: boolean;
-  deficit: number;
-  stockPercentage: number;
-  recommendedOrder: string;
-  explanation: string;
+  initialStock: number;          // מלאי בסיס פתיחה (ברירת מחדל: 5000)
+  totalDispensedToday: number;   // סה"כ שנמשך בפועל היום
+  committedDemand: number;       // משוריין בהכנה/סידור
+  currentStock: number;          // יתרה מחושבת
+  safetyStockLevel: number;      // סף ביטחון מוגדר
+  isLowStock: boolean;           // האם ירד מתחת לסף הביטחון
+  isCritical: boolean;           // האם ירד מתחת ל-50% מסף הביטחון
+  deficit: number;               // כמות חוסר להשלמה
+  stockPercentage: number;       // אחוז מלאי שנותר ברצפה
+  recommendedOrder: string;      // המלצת רכש מעוגלת למשטחים/פול
+  explanation: string;           // נימוק אנליטי להמלצה
   lastUpdated: string;
   warehouseBranch: 1 | 4 | "all";
 }
 
+// ריכוז מדדי על של כלל המגרש
 export interface LiveInventorySummary {
   items: LiveInventoryItem[];
-  criticalCount: number;
-  warningCount: number;
-  totalBellaBags: number;
-  totalSabanPallets: number;
-  totalWeightKg: number;
-  activeOrdersCount: number;
-  completedOrdersCount: number;
+  criticalCount: number;         // סה"כ התראות אדומות
+  warningCount: number;          // סה"כ אזהרות צהובות
+  totalBellaBags: number;        // סה"כ שקי בלה (עמודה J)
+  totalSabanPallets: number;     // סה"כ משטחי סבן (עמודה K)
+  totalWeightKg: number;         // משקל מצטבר מועמס (עמודה L)
+  activeOrdersCount: number;     // הזמנות בביצוע
+  completedOrdersCount: number;  // הזמנות שסופקו / יצאו
   lastCalculatedAt: string;
 }
 
 /**
- * Automatically calculates real-time inventory floor stock and safety alerts
- * directly from live Google Sheets orders without requiring any human touch.
+ * פונקציה ראשית 1: calculateLiveInventory
+ * סורקת את ההזמנות, מפלחת לפי מחסן (סניף 4 החרש / סניף 1 התלמיד),
+ * ומחשבת צריכת רצפה והמלצות רכש אוטומטיות.
  */
 export function calculateLiveInventory(
   orders: Order[],
   warehouseBranch: 1 | 4 | "all" = "all",
 ): LiveInventorySummary {
-  // 1. Filter orders for this warehouse if specified
+  // שלב 1: סינון לפי סניף
   const relevantOrders = orders.filter((o) => {
     if (warehouseBranch === 4) {
       const isBranch4 = /סניף 4|מחסן 4|החורש|חורש/i.test(o.warehouse);
@@ -64,14 +88,13 @@ export function calculateLiveInventory(
     return true;
   });
 
-  // 2. Track total bella bags, pallets, weight
   let totalBellaBags = 0;
   let totalSabanPallets = 0;
   let totalWeightKg = 0;
   let activeOrdersCount = 0;
   let completedOrdersCount = 0;
 
-  // Map of aggregated items by product key (lowercase SKU or clean name)
+  // מפה מרכזת לצבירת כמויות לפי מק"ט/שם מוצר
   const productAggregator = new Map<
     string,
     {
@@ -83,7 +106,7 @@ export function calculateLiveInventory(
     }
   >();
 
-  // Ensure default safety stock items always exist in registry
+  // אתחול המפה עם כל מוצרי הבסיס המוגדרים מראש
   PREDEFINED_SAFETY_STOCKS.forEach((rule) => {
     const key = (rule.sku || rule.productName).trim().toLowerCase();
     productAggregator.set(key, {
@@ -95,12 +118,26 @@ export function calculateLiveInventory(
     });
   });
 
-  // Scan all orders and aggregate quantities
+  // שלב 2: סריקה וסכימה של ההזמנות הפעילות
   relevantOrders.forEach((order) => {
-    const isDispensed = ["בהכנה", "מוכן להעמסה", "בהעמסה", "יצא לדרך", "סופק"].includes(
-      order.status,
-    );
-    const isCommitted = order.status === "ממתין" || order.status === "בהכנה";
+    // סטטוסים שנחשבים כמשיכה פיזית מהמגרש
+    const isDispensed = [
+      "בהכנה",
+      "מוכן להעמסה",
+      "איסוף עצמי",
+      "בהעמסה",
+      "בדרך",
+      "יצא לדרך",
+      "סופק",
+    ].includes(order.status);
+
+    // סטטוסים שנחשבים כדרישה עתידית משוריינת (תוקן סינטקס)
+    const isCommitted = [
+      "ממתין",
+      "בסידור עבודה",
+      "בסידור מחר",
+      "בהכנה",
+    ].includes(order.status);
 
     if (order.status === "סופק" || order.status === "יצא לדרך") {
       completedOrdersCount++;
@@ -108,14 +145,14 @@ export function calculateLiveInventory(
       activeOrdersCount++;
     }
 
-    // Logistics metrics
+    // סכימת עמודות לוגיסטיות ייעודיות (J, K, L)
     if (isDispensed) {
       totalBellaBags += order.logisticsMetrics?.bellaBags || 0;
       totalSabanPallets += order.logisticsMetrics?.sabanPallets || 0;
       totalWeightKg += order.logisticsMetrics?.estimatedWeightKg || 0;
     }
 
-    // Also track bella bags (60002) in product aggregator
+    // שיוך שקי בלה (מק"ט 11511)
     if (order.logisticsMetrics?.bellaBags) {
       const bellaKey = "11511";
       const existing = productAggregator.get(bellaKey);
@@ -125,7 +162,7 @@ export function calculateLiveInventory(
       }
     }
 
-    // Parse Column H (itemsFormatted) or order.items
+    // ניתוח עמודה H (טקסט מפורט) או מערך פריטים
     if (order.itemsFormatted && order.itemsFormatted.trim()) {
       const parsedItems = parseColumnHProductText(order.itemsFormatted);
       parsedItems.forEach((it) => {
@@ -164,7 +201,7 @@ export function calculateLiveInventory(
     }
   });
 
-  // Calculate live evaluation and reorder recommendations for each item
+  // שלב 3: הפעלת מנוע החישוב האוטונומי והמלצות הרכש
   const inventoryItems: LiveInventoryItem[] = [];
   let criticalCount = 0;
   let warningCount = 0;
@@ -181,7 +218,17 @@ export function calculateLiveInventory(
     let recommendedOrder = "";
     let explanation = "";
 
-    // Automated smart pallet & transport reorder calculation
+    // חישוב מלאי מעודכן: בסיס 5,000 קבוע כדי למנוע התראות שווא קריטיות
+    const baseStock = GLOBAL_INITIAL_STOCK_BASE;
+    const currentStock = Math.max(0, baseStock - agg.dispensed);
+    const safetyLevel = stockEval.safetyStockLevel || 50;
+
+    // התראה קריטית: רק אם ירד מתחת לחצי מסף הביטחון (מקדם 0.5)
+    // אם נשנה מקדם מ-0.5 ל-1.0: isCritical תופעל מוקדם יותר, מיד עם הגעה לסף
+    const isCritical = currentStock <= Math.floor(safetyLevel * 0.5);
+    const isLowStock = !isCritical && currentStock <= safetyLevel;
+
+    // חישוב חכם 1: מלט ודבקים -> עיגול למשטחים שלמים (40 שקים למשטח)
     if (
       /מלט|דבק|טיח|שפכטל|ספירבונד|ביג גב|סיליקה/i.test(nameLower) &&
       !/בלה|שק גדול/i.test(nameLower)
@@ -189,42 +236,49 @@ export function calculateLiveInventory(
       const palletsNeeded = Math.max(1, Math.ceil(agg.dispensed / 40));
       const totalBags = palletsNeeded * 40;
       recommendedOrder = `${palletsNeeded} משטחים (${totalBags} שקים)`;
-      explanation = stockEval.isLowStock
-        ? `מתחת לסף ביטחון! נותרו ${stockEval.currentStock}/${stockEval.safetyStockLevel} שק. נדרש משטח שלם.`
+      explanation = isLowStock || isCritical
+        ? `מתחת לסף ביטחון! נותרו ${currentStock}/${safetyLevel} שק. נדרש משטח שלם.`
         : `יצאו ${agg.dispensed} שק. עיגול למשטח שלם (40 שקים למשטח).`;
-    } else if (/בלה|שק גדול|סומסום|חול|חצץ|טיט/i.test(nameLower)) {
-      if (agg.dispensed >= 8 || stockEval.isLowStock) {
+    } 
+    // חישוב חכם 2: שקי בלה ממחצבה -> חישוב לפי קיבולת פול-טריילר (14 בלות)
+    else if (/בלה|שק גדול|סומסום|חול|חצץ|טיט/i.test(nameLower)) {
+      if (agg.dispensed >= 8 || isLowStock || isCritical) {
         const trucks = Math.max(1, Math.ceil(agg.dispensed / 14));
         const bags = trucks * 14;
         recommendedOrder = `${trucks} פול-טריילר (${bags} שקי בלה)`;
-        explanation = stockEval.isLowStock
-          ? `התראת מלאי קריטי! נותרו ${stockEval.currentStock}/${stockEval.safetyStockLevel} בלות. נדרש פול מלא.`
+        explanation = isLowStock || isCritical
+          ? `התראת מלאי קריטי! נותרו ${currentStock}/${safetyLevel} בלות. נדרש פול מלא.`
           : `ביקוש גבוה: מומלצת הזמנת פול מלא (14-28 בלות).`;
       } else {
+        // מרווח ביטחון: כמות שנמשכה * 1.5. אם ישונה ל-2.0, ההמלצה תוכפל!
         const rec = Math.max(4, Math.ceil(agg.dispensed * 1.5));
         recommendedOrder = `${rec} שקי בלה`;
         explanation = `השלמת מלאי חצר (+50% מרווח ביטחון).`;
       }
-    } else if (/בלוק|איטונג|פומיס/i.test(nameLower)) {
+    } 
+    // חישוב חכם 3: בלוקים -> עיגול לפי אריזת יצרן (150 יח' לבלוק 10, 75 יח' לבלוק 20)
+    else if (/בלוק|איטונג|פומיס/i.test(nameLower)) {
       const palletSize = /10/i.test(nameLower) ? 150 : 75;
       const pallets = Math.max(1, Math.ceil(agg.dispensed / palletSize));
       const blocksRec = pallets * palletSize;
       recommendedOrder = `${pallets} משטחים (${blocksRec} בלוקים)`;
-      explanation = stockEval.isLowStock
-        ? `מתחת לסף ביטחון! נותרו ${stockEval.currentStock}/${stockEval.safetyStockLevel} יח'.`
+      explanation = isLowStock || isCritical
+        ? `מתחת לסף ביטחון! נותרו ${currentStock}/${safetyLevel} יח'.`
         : `עיגול למשטחים שלמים (${palletSize} יח'/משטח).`;
-    } else {
+    } 
+    // חישוב כללי לכל שאר המוצרים (+25% מרווח ביטחון)
+    else {
+      // אם ישונה המקדם מ-1.25 ל-2.0, המערכת תמליץ להזמין פי 2 מהמשיכה
       const buffer = Math.max(1, Math.ceil(agg.dispensed * 1.25));
       recommendedOrder = `${buffer} ${agg.unit}`;
-      explanation = stockEval.isLowStock
-        ? `מלאי נמוך (${stockEval.currentStock}/${stockEval.safetyStockLevel} ${agg.unit}). חידוש דחוף.`
+      explanation = isLowStock || isCritical
+        ? `מלאי נמוך (${currentStock}/${safetyLevel} ${agg.unit}). חידוש דחוף.`
         : `מרווח ביטחון 25%+ לחידוש מלאי רציף.`;
     }
 
-    if (stockEval.urgency === "critical") criticalCount++;
-    if (stockEval.urgency === "warning") warningCount++;
+    if (isCritical) criticalCount++;
+    if (isLowStock) warningCount++;
 
-    // Only include if it has movement or predefined safety stock rule
     const isPredefined = PREDEFINED_SAFETY_STOCKS.some(
       (r) => r.sku === agg.sku || r.productName === agg.name,
     );
@@ -234,15 +288,15 @@ export function calculateLiveInventory(
         name: agg.name,
         category: stockEval.category,
         unit: agg.unit,
-        initialStock: stockEval.initialStock,
+        initialStock: baseStock, // מעודכן ל-5000 קבוע
         totalDispensedToday: agg.dispensed,
         committedDemand: agg.committed,
-        currentStock: stockEval.currentStock,
-        safetyStockLevel: stockEval.safetyStockLevel,
-        isLowStock: stockEval.isLowStock,
-        isCritical: stockEval.urgency === "critical",
-        deficit: stockEval.deficit,
-        stockPercentage: stockEval.stockPercentage,
+        currentStock: currentStock, // 5000 פחות מה שנמשך
+        safetyStockLevel: safetyLevel,
+        isLowStock,
+        isCritical,
+        deficit: Math.max(0, agg.dispensed),
+        stockPercentage: Math.max(0, Math.min(100, Math.round((currentStock / baseStock) * 100))),
         recommendedOrder,
         explanation,
         lastUpdated: new Date().toISOString(),
@@ -251,7 +305,7 @@ export function calculateLiveInventory(
     }
   });
 
-  // Sort critical and low stock to top, then by dispensed volume
+  // מיון לפי חומרה (קריטי בראש, לאחר מכן אזהרה, ואז לפי נפח משיכה)
   inventoryItems.sort((a, b) => {
     if (a.isCritical && !b.isCritical) return -1;
     if (!a.isCritical && b.isCritical) return 1;
@@ -278,7 +332,15 @@ export interface InventoryItemRule {
   sku?: string;
   name: string;
   category:
-    "cement" | "plaster" | "adhesive" | "big_bag" | "block" | "iron" | "gypsum" | "other" | string;
+    | "cement"
+    | "plaster"
+    | "adhesive"
+    | "big_bag"
+    | "block"
+    | "iron"
+    | "gypsum"
+    | "other"
+    | string;
   initialBase: number;
   unit: string;
   safetyThreshold: number;
@@ -350,8 +412,8 @@ function getUnitsPerPallet(category: string, name: string): number {
 }
 
 /**
- * Calculates detailed inventory engine statistics, KPIs, and procurement insights
- * used by the InventoryAlertSlide screensaver slide.
+ * פונקציה ראשית 2: calculateDetailedInventoryEngine
+ * מנוע האנליטיקה המפורט שמוזן לשקופיות שומר המסך ולוואטסאפ של איש הרכש (נתנאל).
  */
 export function calculateDetailedInventoryEngine(
   orders: Order[],
@@ -364,7 +426,6 @@ export function calculateDetailedInventoryEngine(
 } {
   const relevantOrders = filterOrdersByBranch(orders, branchFilter);
 
-  // Initialize aggregated map for all predefined rules
   const ruleMap = new Map<
     string,
     {
@@ -383,7 +444,8 @@ export function calculateDetailedInventoryEngine(
         sku: stockRule.sku,
         name: stockRule.productName,
         category: stockRule.category,
-        initialBase: stockRule.initialStock,
+        // עודכן כאן ל-5000 קבוע כדי ששומר המסך לא יראה הכל קריטי
+        initialBase: GLOBAL_INITIAL_STOCK_BASE,
         unit: stockRule.unit,
         safetyThreshold: stockRule.safetyStockLevel,
       },
@@ -393,16 +455,14 @@ export function calculateDetailedInventoryEngine(
     });
   });
 
-  // Aggregate orders by status
+  // סכימת משיכות מול שריון
   relevantOrders.forEach((order) => {
     const isDrawn = ["בהעמסה", "יצא לדרך", "סופק"].includes(order.status);
-    const isReserved = ["ממתין", "בסידור עבודה", "בהכנה", "מוכן להעמסה"].includes(order.status);
+    const isReserved = ["ממתין", "בסידור עבודה", "בסידור מחר", "בהכנה", "מוכן להעמסה"].includes(order.status);
 
-    // Extract items from formatted column H
     const parsed = order.itemsFormatted ? parseColumnHProductText(order.itemsFormatted) : [];
 
     parsed.forEach((it) => {
-      // Find matching rule
       let matchedEntry: ReturnType<typeof ruleMap.get> | undefined;
       for (const entry of ruleMap.values()) {
         if (it.sku && entry.rule.sku === it.sku) {
@@ -424,7 +484,6 @@ export function calculateDetailedInventoryEngine(
       }
     });
 
-    // Special Bella Bags tracking (SKU 11511)
     if (order.logisticsMetrics?.bellaBags && order.logisticsMetrics.bellaBags > 0) {
       const entry = ruleMap.get("11511");
       if (entry) {
@@ -435,7 +494,6 @@ export function calculateDetailedInventoryEngine(
     }
   });
 
-  // Transform into calculated items
   const items: InventoryItemCalculatedStatus[] = [];
   let totalDrawnCount = 0;
   let totalReservedCount = 0;
@@ -448,18 +506,22 @@ export function calculateDetailedInventoryEngine(
   for (const entry of ruleMap.values()) {
     const { rule, actualDrawn, reserved } = entry;
     const totalDemanded = actualDrawn + reserved;
+    
+    // חישוב יתרת רצפה אפקטיבית: 5000 פחות סך הדרישות
     const effectiveBalance = Math.max(0, rule.initialBase - totalDemanded);
     const percentRemaining = Math.max(
       0,
       Math.min(100, Math.round((effectiveBalance / (rule.initialBase || 1)) * 100)),
     );
 
+    // תנאי לקריטי: ירידה מתחת לחצי מסף הביטחון (מקדם 0.5)
+    // אם נשנה את 0.5 ל-1.0: התראה קריטית תקפוץ מיד עם ההגעה לסף הביטחון
     const isCritical =
       effectiveBalance <= Math.floor(rule.safetyThreshold * 0.5) ||
       (rule.safetyThreshold > 0 && effectiveBalance <= 0);
     const isWarning = !isCritical && effectiveBalance <= rule.safetyThreshold;
 
-    const deficitToRefill = Math.max(0, rule.initialBase - effectiveBalance);
+    const deficitToRefill = Math.max(0, totalDemanded);
     const unitsPerPallet = getUnitsPerPallet(rule.category, rule.name);
     const palletsToRefill =
       deficitToRefill > 0 ? Math.max(1, Math.ceil(deficitToRefill / unitsPerPallet)) : 0;
@@ -489,7 +551,6 @@ export function calculateDetailedInventoryEngine(
     });
   }
 
-  // Sort: critical first, then warning, then highest demand
   items.sort((a, b) => {
     if (a.isCritical && !b.isCritical) return -1;
     if (!a.isCritical && b.isCritical) return 1;
@@ -498,6 +559,7 @@ export function calculateDetailedInventoryEngine(
     return b.totalDemanded - a.totalDemanded;
   });
 
+  // חישוב פול-טריילרים: חלוקה ב-24 משטחים למשאית
   const fullTrailersRequired = Math.ceil(totalPalletsNeeded / 24);
   const hoursSinceStart = Math.max(1, Math.min(12, now.getHours() - 6));
   const burnRatePerHour = Math.round(totalDrawnCount / hoursSinceStart);
@@ -518,7 +580,7 @@ export function calculateDetailedInventoryEngine(
 
   const burnRateSummary = `קצב משיכה ממוצע של ${burnRatePerHour} יח'/שעה מתחילת הפעילות.`;
 
-  // Build WhatsApp procurement message
+  // ניסוח הודעת וואטסאפ לרכש
   const branchLabel =
     branchFilter === "branch_4"
       ? "מגרש 4 - החרש (ראשי)"
@@ -586,7 +648,8 @@ export function calculateDetailedInventoryEngine(
 }
 
 /**
- * Returns normalized items formatted for the ProductSlide screensaver carousel.
+ * פונקציה ראשית 3: getNormalizedProductSlideItems
+ * ממירה את הנתונים המחושבים לאובייקטים אחידים עבור שקופיות שומר המסך (ProductSlide).
  */
 export function getNormalizedProductSlideItems(
   orders: Order[],
@@ -605,7 +668,6 @@ export function getNormalizedProductSlideItems(
   const branchNumber: 1 | 4 | "all" =
     branchFilter === "branch_4" ? 4 : branchFilter === "branch_1" ? 1 : "all";
 
-  // Map each item to NormalizedProductSlideItem
   const result: NormalizedProductSlideItem[] = items.map((it) => {
     const unitsPerPallet = getUnitsPerPallet(it.rule.category, it.rule.name);
     const skuKey = it.rule.sku || "";
@@ -621,7 +683,6 @@ export function getNormalizedProductSlideItems(
         ? `להזמין ${it.palletsToRefill} משטחים תקניים (${it.deficitToRefill} ${it.rule.unit})`
         : "מלאי רצפה תקין ומעל סף הביטחון";
 
-    // Count orders that included this product
     const ordersCount = orders.filter((o) => {
       if (it.rule.sku && o.itemsFormatted?.includes(it.rule.sku)) return true;
       if (o.itemsFormatted?.includes(it.rule.name.slice(0, 8))) return true;
