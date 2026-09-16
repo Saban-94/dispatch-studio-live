@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback, Component, ErrorInfo, ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   PackageCheck,
@@ -24,7 +24,6 @@ import {
   Share2,
   Copy,
   Check,
-  MessageCircle,
   X,
   TrendingUp,
   Sun,
@@ -49,6 +48,30 @@ import { usePwaInstall } from "@/hooks/usePwaInstall";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 
+// Error boundary פנימי למניעת קריסת עמוד
+class SafeBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.warn("SafeBoundary caught error:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback || (
+        <div className="p-4 rounded-xl bg-card border border-border text-center text-xs text-muted-foreground">
+          טעינת נתונים זמנית...
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export type PickerProfile = "oren" | "tamir" | "all";
 type MobileTab = "picking" | "ready" | "inventory" | "truck_builder";
 
@@ -69,28 +92,25 @@ interface TruckDraft {
 
 function LiveKpiBanner({ orders = [] }: { orders: Order[] }) {
   const [isOpen, setIsOpen] = useState(true);
-  const bales = orders.reduce((sum, order) => sum + (order?.logisticsMetrics?.bellaBags || 0), 0);
-  const pallets = orders.reduce((sum, order) => sum + (order?.logisticsMetrics?.sabanPallets || 0), 0);
-  const active = orders.filter(
+  const safeOrders = Array.isArray(orders) ? orders : [];
+  const bales = safeOrders.reduce((sum, order) => sum + (order?.logisticsMetrics?.bellaBags || 0), 0);
+  const pallets = safeOrders.reduce((sum, order) => sum + (order?.logisticsMetrics?.sabanPallets || 0), 0);
+  const active = safeOrders.filter(
     (order) => order?.status === "ממתין" || order?.status === "בהכנה",
   ).length;
-  const loadReady = orders.filter(
+  const loadReady = safeOrders.filter(
     (order) => order?.status === "מוכן להעמסה" || order?.status === "בהעמסה",
   ).length;
 
   return (
-    <section
-      className="overflow-hidden rounded-2xl border border-sky-500/30 bg-sky-950/20 shadow-sm transition-all"
-      aria-label="מדדי מחסן חיים"
-    >
+    <section className="overflow-hidden rounded-2xl border border-sky-500/30 bg-sky-950/20 shadow-sm transition-all">
       <button
         type="button"
         onClick={() => setIsOpen((value) => !value)}
-        aria-expanded={isOpen}
-        className="flex min-h-11 w-full items-center justify-between gap-3 px-3.5 py-2 text-right focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+        className="flex min-h-11 w-full items-center justify-between gap-3 px-3.5 py-2 text-right focus:outline-none"
       >
         <span className="flex items-center gap-2 text-xs font-black text-sky-400">
-          <TrendingUp className="size-4" aria-hidden="true" /> מדדי משמרת חיים
+          <TrendingUp className="size-4" /> מדדי משמרת חיים
         </span>
         <span className="text-[11px] font-bold text-sky-400/80">{isOpen ? "צמצום" : "הצגה"}</span>
       </button>
@@ -104,26 +124,12 @@ function LiveKpiBanner({ orders = [] }: { orders: Order[] }) {
             <div className="text-lg font-black tabular-nums text-foreground">{pallets}</div>
             <div className="text-[10px] font-bold text-muted-foreground">משטחים · 60060</div>
           </div>
-          <div
-            className={cn(
-              "rounded-xl p-2 border border-border/50 text-center transition-colors",
-              active > 0 ? "bg-amber-500/15 border-amber-500/30" : "bg-background/80"
-            )}
-          >
-            <div className="text-lg font-black tabular-nums text-foreground">
-              {active ? "20 דק׳" : "—"}
-            </div>
+          <div className={cn("rounded-xl p-2 border border-border/50 text-center", active > 0 ? "bg-amber-500/15 border-amber-500/30" : "bg-background/80")}>
+            <div className="text-lg font-black tabular-nums text-foreground">{active ? "20 דק׳" : "—"}</div>
             <div className="text-[10px] font-bold text-muted-foreground">SLA ליקוט</div>
           </div>
-          <div
-            className={cn(
-              "rounded-xl p-2 border border-border/50 text-center transition-colors",
-              loadReady > 0 ? "bg-rose-500/15 border-rose-500/30" : "bg-background/80"
-            )}
-          >
-            <div className="text-lg font-black tabular-nums text-foreground">
-              {loadReady ? "15 דק׳" : "—"}
-            </div>
+          <div className={cn("rounded-xl p-2 border border-border/50 text-center", loadReady > 0 ? "bg-rose-500/15 border-rose-500/30" : "bg-background/80")}>
+            <div className="text-lg font-black tabular-nums text-foreground">{loadReady ? "15 דק׳" : "—"}</div>
             <div className="text-[10px] font-bold text-muted-foreground">SLA העמסה</div>
           </div>
         </div>
@@ -133,18 +139,17 @@ function LiveKpiBanner({ orders = [] }: { orders: Order[] }) {
 }
 
 export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
-  const {
-    published = [],
-    startPicking,
-    finishPicking,
-    reportPickerOverrun,
-    quickUpdateStatus,
-    syncNow,
-    syncStatus,
-    toggleItemApproval,
-    approveAllItems,
-    pushAlert,
-  } = useDispatchBoard();
+  const context = useDispatchBoard();
+  const published = context?.published ?? [];
+  const startPicking = context?.startPicking ?? (() => {});
+  const finishPicking = context?.finishPicking ?? (() => {});
+  const reportPickerOverrun = context?.reportPickerOverrun ?? (() => {});
+  const quickUpdateStatus = context?.quickUpdateStatus ?? (() => {});
+  const syncNow = context?.syncNow ?? (() => {});
+  const syncStatus = context?.syncStatus ?? "idle";
+  const toggleItemApproval = context?.toggleItemApproval ?? (() => {});
+  const approveAllItems = context?.approveAllItems ?? (() => {});
+  const pushAlert = context?.pushAlert ?? (() => {});
 
   const [selectedProfile, setSelectedProfile] = useState<PickerProfile>("oren");
   const [activeTab, setActiveTab] = useState<MobileTab>("picking");
@@ -155,8 +160,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
       const urlParams = new URLSearchParams(window.location.search);
       const pickerParam = urlParams.get("picker");
       const warehouseParam = urlParams.get("warehouse");
-      const warehousePicker =
-        warehouseParam === "4" ? "oren" : warehouseParam === "1" ? "tamir" : null;
+      const warehousePicker = warehouseParam === "4" ? "oren" : warehouseParam === "1" ? "tamir" : null;
       if (warehousePicker) {
         setSelectedProfile(warehousePicker);
         return;
@@ -167,7 +171,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
       }
       const saved = localStorage.getItem("saban_active_picker_profile");
       if (saved === "oren" || saved === "tamir" || saved === "all") {
-        setSelectedProfile(saved);
+        setSelectedProfile(saved as PickerProfile);
       }
     }
   }, []);
@@ -190,7 +194,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
   } | null>(null);
 
   const [isMuted, setIsMuted] = useState(false);
-
   const { isInstallable, promptInstall, isIOS } = usePwaInstall();
   const [showInstallBanner, setShowInstallBanner] = useState(true);
 
@@ -218,22 +221,31 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
     setExpandedOrderIds((prev) => ({ ...prev, [orderId]: !prev[orderId] }));
   };
 
-  const warehouseMatchesProfile = (warehouse: string, profile: PickerProfile) => {
-    const value = (warehouse || "").trim().toLowerCase();
-    if (!value) return false;
+  const warehouseMatchesProfile = (warehouse: string | undefined, profile: PickerProfile) => {
+    const value = String(warehouse || "").trim().toLowerCase();
+    if (!value) return true;
     if (profile === "oren") return /סניף\s*4|מחסן\s*4|החורש|החרש/.test(value);
     if (profile === "tamir") return /סניף\s*1|מחסן\s*1|התלמיד/.test(value);
     return true;
   };
 
-  const safePublished = useMemo(() => (Array.isArray(published) ? published : []), [published]);
+  // מנרמל הזמנות ומוודא שאין ערכי null/undefined בשדות המפתח
+  const safePublished = useMemo(() => {
+    return (Array.isArray(published) ? published : [])
+      .filter((o): o is Order => !!o)
+      .map((o) => ({
+        ...o,
+        warehouse: o.warehouse || "סניף 4 החרש",
+        customerName: o.customerName || "לקוח",
+        city: o.city || "",
+        status: o.status || "ממתין",
+        items: Array.isArray(o.items) ? o.items : [],
+      }));
+  }, [published]);
 
   useEffect(() => {
     safePublished.forEach((order) => {
-      if (!order) return;
-      if (selectedProfile !== "all" && !warehouseMatchesProfile(order.warehouse, selectedProfile))
-        return;
-
+      if (!warehouseMatchesProfile(order.warehouse, selectedProfile)) return;
       const rawSummary = (order.items || []).map((i) => i.name).join(" ") + " " + (order.customerName || "");
       const match = rawSummary.match(/([0-9]+)\s*(?:בלות|בלה|שק גדול)?\s*סומסום/);
       if (match) {
@@ -251,9 +263,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
 
   const filteredOrders = useMemo(() => {
     return safePublished.filter((order) => {
-      if (!order) return false;
-      if (selectedProfile !== "all" && !warehouseMatchesProfile(order.warehouse, selectedProfile))
-        return false;
+      if (!warehouseMatchesProfile(order.warehouse, selectedProfile)) return false;
 
       if (activeTab === "picking") {
         if (order.status === "סופק" || order.status === "יצא לדרך" || order.status === "מוכן להעמסה" || order.status === "בהעמסה") return false;
@@ -278,9 +288,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
     let active = 0;
     let ready = 0;
     safePublished.forEach((o) => {
-      if (!o) return;
-      if (selectedProfile !== "all" && !warehouseMatchesProfile(o.warehouse, selectedProfile))
-        return;
+      if (!warehouseMatchesProfile(o.warehouse, selectedProfile)) return;
       if (o.status === "ממתין" || o.status === "בהכנה") active++;
       else if (o.status === "מוכן להעמסה" || o.status === "בהעמסה") ready++;
     });
@@ -317,554 +325,487 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
   };
 
   return (
-    <div dir="rtl" className="min-h-screen overflow-x-hidden bg-background text-foreground font-sans pb-28 selection:bg-amber-500 selection:text-slate-950">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-card/95 backdrop-blur-md border-b border-border px-3.5 pt-2.5 pb-2 shadow-sm">
-        <div className="flex items-center justify-between gap-2 max-w-2xl mx-auto">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="size-10 rounded-xl bg-gradient-to-tr from-sky-600 to-amber-500 p-0.5 shadow-sm shrink-0">
-              <div className="w-full h-full bg-card rounded-[10px] flex items-center justify-center">
-                <PackageCheck className="size-5 text-amber-500" />
+    <SafeBoundary>
+      <div dir="rtl" className="min-h-screen overflow-x-hidden bg-background text-foreground font-sans pb-28 select-none">
+        {/* Header */}
+        <header className="sticky top-0 z-40 bg-card/95 backdrop-blur-md border-b border-border px-3.5 pt-2.5 pb-2 shadow-sm">
+          <div className="flex items-center justify-between gap-2 max-w-2xl mx-auto">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="size-10 rounded-xl bg-gradient-to-tr from-sky-600 to-amber-500 p-0.5 shadow-sm shrink-0">
+                <div className="w-full h-full bg-card rounded-[10px] flex items-center justify-center">
+                  <PackageCheck className="size-5 text-amber-500" />
+                </div>
+              </div>
+              <div className="truncate">
+                <h1 className="text-sm sm:text-base font-black tracking-tight text-foreground leading-tight truncate">
+                  ח. סבן · מסוף ליקוט
+                </h1>
+                <p className="text-[10px] text-muted-foreground font-medium">סנכרון רצפת מגרש חי</p>
               </div>
             </div>
-            <div className="truncate">
-              <h1 className="text-sm sm:text-base font-black tracking-tight text-foreground leading-tight truncate">
-                ח. סבן · מסוף ליקוט
-              </h1>
-              <p className="text-[10px] text-muted-foreground font-medium">סנכרון רצפת מגרש חי</p>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="flex h-10 px-2.5 items-center gap-1.5 rounded-xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary font-black text-xs"
+              >
+                {theme === "dark" ? <Sun className="size-4 text-amber-400" /> : <Moon className="size-4 text-slate-700" />}
+                <span>{theme === "dark" ? "יום" : "לילה"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    toggleAudioMute();
+                  } catch {}
+                }}
+                className={cn(
+                  "size-10 rounded-xl border transition-all flex items-center justify-center active:scale-95 shadow-sm",
+                  isMuted ? "bg-rose-500/10 border-rose-500/30 text-rose-500" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500",
+                )}
+              >
+                {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => syncNow()}
+                disabled={syncStatus === "syncing"}
+                className="size-10 rounded-xl bg-card border border-border text-foreground hover:bg-secondary transition-all flex items-center justify-center active:scale-95 shadow-sm"
+              >
+                <RefreshCw className={cn("size-4", syncStatus === "syncing" && "animate-spin text-sky-500")} />
+              </button>
+
+              {onOpenTraffic && (
+                <button
+                  type="button"
+                  onClick={onOpenTraffic}
+                  className="size-10 rounded-xl bg-card border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 transition-all flex items-center justify-center relative active:scale-95 shadow-sm"
+                >
+                  <Compass className="size-4 text-sky-500" />
+                  <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 animate-ping" />
+                </button>
+              )}
+
+              {onSwitchToTv && (
+                <button
+                  type="button"
+                  onClick={onSwitchToTv}
+                  className="h-10 px-2 rounded-xl bg-primary/15 border border-primary/30 text-primary text-xs font-bold flex items-center gap-1 active:scale-95 shadow-sm"
+                >
+                  <Tv className="size-4" />
+                  <span>TV</span>
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            {/* Theme Toggle Button */}
-            <button
-              type="button"
-              onClick={toggleTheme}
-              className="flex h-10 px-2.5 items-center gap-1.5 rounded-xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary font-black text-xs"
-              title={theme === "dark" ? "עבור למצב יום" : "עבור למצב לילה"}
-            >
-              {theme === "dark" ? <Sun className="size-4 text-amber-400" /> : <Moon className="size-4 text-slate-700" />}
-              <span>{theme === "dark" ? "יום" : "לילה"}</span>
-            </button>
-
-            {/* Audio Mute Toggle */}
-            <button
-              type="button"
-              onClick={() => {
-                try {
-                  toggleAudioMute();
-                } catch {}
-              }}
-              title={isMuted ? "בטל השתקת צלילים" : "השתק צלילים"}
-              className={cn(
-                "size-10 rounded-xl border transition-all flex items-center justify-center active:scale-95 shadow-sm",
-                isMuted
-                  ? "bg-rose-500/10 border-rose-500/30 text-rose-500"
-                  : "bg-emerald-500/10 border-emerald-500/30 text-emerald-500",
-              )}
-            >
-              {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-            </button>
-
-            {/* Refresh */}
-            <button
-              type="button"
-              onClick={() => syncNow()}
-              disabled={syncStatus === "syncing"}
-              title="רענן הזמנות מגיליון"
-              className="size-10 rounded-xl bg-card border border-border text-foreground hover:bg-secondary transition-all flex items-center justify-center active:scale-95 shadow-sm"
-            >
-              <RefreshCw
-                className={cn("size-4", syncStatus === "syncing" && "animate-spin text-sky-500")}
-              />
-            </button>
-
-            {/* Waze / Traffic */}
-            {onOpenTraffic && (
-              <button
-                type="button"
-                onClick={onOpenTraffic}
-                title="מפת פקקים חיה"
-                className="size-10 rounded-xl bg-card border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 transition-all flex items-center justify-center relative active:scale-95 shadow-sm"
+          {/* Marquee Ticker */}
+          <div className="max-w-2xl mx-auto mt-2 flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-2.5 py-1 shadow-inner">
+            <div className="flex items-center gap-1 text-[10px] font-black text-primary shrink-0 border-l border-primary/20 pl-2">
+              <Bell className="size-3 animate-bounce" />
+              <span>עדכון</span>
+            </div>
+            <div className="relative flex-1 overflow-hidden h-3.5">
+              <motion.div
+                className="absolute whitespace-nowrap text-[10px] font-bold text-foreground flex gap-8"
+                animate={{ x: [250, -600] }}
+                transition={{ repeat: Infinity, duration: 18, ease: "linear" }}
               >
-                <Compass className="size-4 text-sky-500" />
-                <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 animate-ping" />
-              </button>
-            )}
-
-            {/* Switch to TV Dashboard */}
-            {onSwitchToTv && (
-              <button
-                type="button"
-                onClick={onSwitchToTv}
-                className="h-10 px-2 rounded-xl bg-primary/15 border border-primary/30 text-primary text-xs font-bold flex items-center gap-1 active:scale-95 shadow-sm"
-              >
-                <Tv className="size-4" />
-                <span>TV</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Ticker */}
-        <div className="max-w-2xl mx-auto mt-2 flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-2.5 py-1 shadow-inner">
-          <div className="flex items-center gap-1 text-[10px] font-black text-primary shrink-0 border-l border-primary/20 pl-2">
-            <Bell className="size-3 animate-bounce" />
-            <span>עדכון</span>
+                <span>🚚 חכמת (מרצדס מנוף): עד 12T / 18 בלות | בלוק 1.5T עם פקדון</span>
+                <span>🚛 עלי (איסוזו פלטה): עד 5.5T | ללא פקדונות משטחים</span>
+                <span>📦 ספק בית הטיט: משאיות עד 30 בלות | שקיות במשטח: 70 יח'</span>
+              </motion.div>
+            </div>
           </div>
 
-          <div className="relative flex-1 overflow-hidden h-3.5">
+          {/* Persona Selector */}
+          <div className="max-w-2xl mx-auto mt-2">
+            <div className="grid grid-cols-3 gap-1 p-1 bg-muted/60 rounded-2xl border border-border text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => handleProfileChange("oren")}
+                className={cn(
+                  "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
+                  selectedProfile === "oren"
+                    ? "bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-card/60",
+                )}
+              >
+                <span>👷 אורן</span>
+                <span className="text-[9px] opacity-90">סניף 4 החרש</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleProfileChange("tamir")}
+                className={cn(
+                  "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
+                  selectedProfile === "tamir"
+                    ? "bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-card/60",
+                )}
+              >
+                <span>👷 תמיר</span>
+                <span className="text-[9px] opacity-90">סניף 1 התלמיד</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleProfileChange("all")}
+                className={cn(
+                  "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
+                  selectedProfile === "all"
+                    ? "bg-primary text-primary-foreground font-black shadow-md"
+                    : "text-muted-foreground hover:text-foreground hover:bg-card/60",
+                )}
+              >
+                <span>🌐 כל המחסנים</span>
+                <span className="text-[9px] opacity-90">מנהל / סדרן</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Popup 10 בלות סומסום */}
+        <AnimatePresence>
+          {activeAlert && (
             <motion.div
-              className="absolute whitespace-nowrap text-[10px] font-bold text-foreground flex gap-8"
-              animate={{ x: [250, -600] }}
-              transition={{ repeat: Infinity, duration: 18, ease: "linear" }}
+              initial={{ opacity: 0, y: -40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -40 }}
+              className="fixed top-20 inset-x-4 z-50 rounded-3xl border-2 border-rose-500 bg-rose-950/95 p-4 text-white shadow-2xl backdrop-blur-xl"
             >
-              <span>🚚 חכמת (מרצדס מנוף): עד 12T / 18 בלות | בלוק 1.5T עם פקדון</span>
-              <span>🚛 עלי (איסוזו פלטה): עד 5.5T | ללא פקדונות משטחים</span>
-              <span>📦 ספק בית הטיט: משאיות של עד 30 בלות | שקיות במשטח: 70 יח'</span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <AlertTriangle className="size-6 text-rose-400 animate-bounce shrink-0" />
+                  <div>
+                    <h3 className="text-sm font-black text-rose-200 leading-snug">התראת עומס משיכה — 10 בלות סומסום!</h3>
+                    <p className="text-[11px] font-semibold text-white/90 mt-0.5">
+                      הזמנה #{activeAlert.orderId} עבור {activeAlert.client} כוללת {activeAlert.sumsumCount} בלות סומסום.
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setActiveAlert(null)} className="grid size-7 place-items-center rounded-lg bg-white/10 text-white/80">
+                  <X className="size-4" />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 mt-3 pt-2 border-t border-rose-500/40">
+                <button
+                  onClick={() => {
+                    setTruckDraft((prev) => ({ ...prev, sumsumBags: prev.sumsumBags + activeAlert.sumsumCount }));
+                    setActiveAlert(null);
+                    setActiveTab("truck_builder");
+                  }}
+                  className="flex-1 h-9 rounded-xl bg-white text-slate-950 font-black text-xs shadow-md active:scale-95"
+                >
+                  הוסף {activeAlert.sumsumCount} בלות למשאית בית הטיט
+                </button>
+                <button onClick={() => setActiveAlert(null)} className="h-9 px-3 rounded-xl bg-white/15 text-white font-bold text-xs">
+                  סגור
+                </button>
+              </div>
             </motion.div>
-          </div>
-        </div>
+          )}
+        </AnimatePresence>
 
-        {/* Persona Selector */}
-        <div className="max-w-2xl mx-auto mt-2">
-          <div className="grid grid-cols-3 gap-1 p-1 bg-muted/60 rounded-2xl border border-border text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => handleProfileChange("oren")}
-              className={cn(
-                "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
-                selectedProfile === "oren"
-                  ? "bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-card/60",
-              )}
-            >
-              <span>👷 אורן</span>
-              <span className="text-[9px] opacity-90">סניף 4 החרש</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleProfileChange("tamir")}
-              className={cn(
-                "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
-                selectedProfile === "tamir"
-                  ? "bg-amber-500 text-slate-950 font-black shadow-md shadow-amber-500/20"
-                  : "text-muted-foreground hover:text-foreground hover:bg-card/60",
-              )}
-            >
-              <span>👷 תמיר</span>
-              <span className="text-[9px] opacity-90">סניף 1 התלמיד</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleProfileChange("all")}
-              className={cn(
-                "py-1.5 px-2 rounded-xl transition-all flex flex-col items-center gap-0.5",
-                selectedProfile === "all"
-                  ? "bg-primary text-primary-foreground font-black shadow-md"
-                  : "text-muted-foreground hover:text-foreground hover:bg-card/60",
-              )}
-            >
-              <span>🌐 כל המחסנים</span>
-              <span className="text-[9px] opacity-90">מנהל / סדרן</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Popup 10 בלות סומסום */}
-      <AnimatePresence>
-        {activeAlert && (
-          <motion.div
-            initial={{ opacity: 0, y: -40 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -40 }}
-            className="fixed top-20 inset-x-4 z-50 rounded-3xl border-2 border-rose-500 bg-rose-950/95 p-4 text-white shadow-2xl backdrop-blur-xl"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <AlertTriangle className="size-6 text-rose-400 animate-bounce shrink-0" />
-                <div>
-                  <h3 className="text-sm font-black text-rose-200 leading-snug">
-                    התראת עומס משיכה — 10 בלות סומסום!
-                  </h3>
-                  <p className="text-[11px] font-semibold text-white/90 mt-0.5">
-                    הזמנה #{activeAlert.orderId} עבור {activeAlert.client} כוללת {activeAlert.sumsumCount} בלות סומסום.
+        {/* Main Content */}
+        <main className="max-w-2xl mx-auto px-3.5 pt-3 space-y-3.5">
+          {isInstallable && showInstallBanner && (
+            <div className="bg-card border border-border/80 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="size-9 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0">
+                  <Smartphone className="size-4" />
+                </div>
+                <div className="truncate">
+                  <h4 className="text-xs font-bold text-foreground truncate">התקן את אפליקציית הליקוט</h4>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {isIOS ? "באייפון: לחץ שיתוף > 'הוסף למסך הבית'" : "גישה מהירה ישירות ממסך הבית"}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setActiveAlert(null)}
-                className="grid size-7 place-items-center rounded-lg bg-white/10 text-white/80"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 mt-3 pt-2 border-t border-rose-500/40">
-              <button
-                onClick={() => {
-                  setTruckDraft((prev) => ({ ...prev, sumsumBags: prev.sumsumBags + activeAlert.sumsumCount }));
-                  setActiveAlert(null);
-                  setActiveTab("truck_builder");
-                }}
-                className="flex-1 h-9 rounded-xl bg-white text-slate-950 font-black text-xs shadow-md active:scale-95"
-              >
-                הוסף {activeAlert.sumsumCount} בלות למשאית בית הטיט
-              </button>
-              <button
-                onClick={() => setActiveAlert(null)}
-                className="h-9 px-3 rounded-xl bg-white/15 text-white font-bold text-xs"
-              >
-                סגור
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Container */}
-      <main className="max-w-2xl mx-auto px-3.5 pt-3 space-y-3.5">
-        {isInstallable && showInstallBanner && (
-          <div className="bg-card border border-border/80 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="size-9 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0">
-                <Smartphone className="size-4" />
-              </div>
-              <div className="truncate">
-                <h4 className="text-xs font-bold text-foreground truncate">התקן את אפליקציית הליקוט</h4>
-                <p className="text-[10px] text-muted-foreground truncate">
-                  {isIOS ? "באייפון: לחץ שיתוף > 'הוסף למסך הבית'" : "גישה מהירה וצלילי התראה ישירות במסך הבית"}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              {!isIOS && (
-                <button
-                  type="button"
-                  onClick={() => promptInstall()}
-                  className="px-3 py-1 bg-primary text-primary-foreground rounded-xl text-xs font-bold active:scale-95"
-                >
-                  התקן
+              <div className="flex items-center gap-1.5 shrink-0">
+                {!isIOS && (
+                  <button type="button" onClick={() => promptInstall()} className="px-3 py-1 bg-primary text-primary-foreground rounded-xl text-xs font-bold active:scale-95">
+                    התקן
+                  </button>
+                )}
+                <button type="button" onClick={() => setShowInstallBanner(false)} className="text-muted-foreground text-xs px-1">
+                  סגור
                 </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setShowInstallBanner(false)}
-                className="text-muted-foreground text-xs px-1"
-              >
-                סגור
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === "truck_builder" ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-border/80 bg-card p-3.5 shadow-sm">
-              <div className="flex items-center justify-between mb-1.5">
-                <h3 className="text-sm font-black flex items-center gap-1.5">
-                  <Truck className="size-4 text-primary" />
-                  <span>הרכבת משאית לספק בית הטיט</span>
-                </h3>
-                <span className="text-[11px] font-black text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md">
-                  עד 30 בלות למשאית
-                </span>
               </div>
+            </div>
+          )}
 
-              <div className="mt-2">
-                <div className="flex justify-between text-xs font-bold mb-1">
-                  <span className="text-muted-foreground">תפוסת בלות:</span>
-                  <span className={cn("font-black", isFullTruck ? "text-emerald-500" : "text-amber-500")}>
-                    {totalDraftBags} / 30 בלות ({Math.round((totalDraftBags / 30) * 100)}%)
+          {activeTab === "truck_builder" ? (
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-border/80 bg-card p-3.5 shadow-sm">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm font-black flex items-center gap-1.5">
+                    <Truck className="size-4 text-primary" />
+                    <span>הרכבת משאית לספק בית הטיט</span>
+                  </h3>
+                  <span className="text-[11px] font-black text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md">
+                    עד 30 בלות למשאית
                   </span>
                 </div>
-                <div className="h-2.5 w-full bg-secondary rounded-full overflow-hidden p-0.5">
-                  <motion.div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      isFullTruck ? "bg-emerald-500" : "bg-primary"
-                    )}
-                    style={{ width: `${Math.min(100, (totalDraftBags / 30) * 100)}%` }}
-                  />
+
+                <div className="mt-2">
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-muted-foreground">תפוסת בלות:</span>
+                    <span className={cn("font-black", isFullTruck ? "text-emerald-500" : "text-amber-500")}>
+                      {totalDraftBags} / 30 בלות ({Math.round((totalDraftBags / 30) * 100)}%)
+                    </span>
+                  </div>
+                  <div className="h-2.5 w-full bg-secondary rounded-full overflow-hidden p-0.5">
+                    <motion.div
+                      className={cn("h-full rounded-full transition-all", isFullTruck ? "bg-emerald-500" : "bg-primary")}
+                      style={{ width: `${Math.min(100, (totalDraftBags / 30) * 100)}%` }}
+                    />
+                  </div>
                 </div>
               </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
+                  <span className="text-xs font-bold text-muted-foreground">בלות חול</span>
+                  <span className="text-xl font-black text-foreground my-1">{truckDraft.sandBags}</span>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, sandBags: Math.max(0, p.sandBags - 1) }))} className="size-7 rounded-lg bg-secondary grid place-items-center">
+                      <Minus className="size-3.5" />
+                    </button>
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, sandBags: p.sandBags + 1 }))} className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">
+                      <Plus className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
+                  <span className="text-xs font-bold text-muted-foreground">בלות סומסום</span>
+                  <span className="text-xl font-black text-foreground my-1">{truckDraft.sumsumBags}</span>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: Math.max(0, p.sumsumBags - 1) }))} className="size-7 rounded-lg bg-secondary grid place-items-center">
+                      <Minus className="size-3.5" />
+                    </button>
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: p.sumsumBags + 1 }))} className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">
+                      <Plus className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
+                  <span className="text-xs font-bold text-muted-foreground">בלות טיט</span>
+                  <span className="text-xl font-black text-foreground my-1">{truckDraft.titBags}</span>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, titBags: Math.max(0, p.titBags - 1) }))} className="size-7 rounded-lg bg-secondary grid place-items-center">
+                      <Minus className="size-3.5" />
+                    </button>
+                    <button onClick={() => setTruckDraft((p) => ({ ...p, titBags: p.titBags + 1 }))} className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold">
+                      <Plus className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
+                <span className="text-xs font-black text-muted-foreground block mb-2">
+                  משטחי שקיות (אריזת יצרן בית הטיט: 70 שקיות למשטח):
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/40 border border-border/60">
+                    <div>
+                      <span className="text-xs font-bold block">משטח שק חול</span>
+                      <span className="text-[9px] text-muted-foreground">70 יח' במשטח</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: Math.max(0, p.sandSmallPallets - 1) }))} className="size-6 rounded-md bg-secondary grid place-items-center">
+                        <Minus className="size-3" />
+                      </button>
+                      <span className="font-black text-xs">{truckDraft.sandSmallPallets}</span>
+                      <button onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: p.sandSmallPallets + 1 }))} className="size-6 rounded-md bg-primary text-primary-foreground grid place-items-center">
+                        <Plus className="size-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/40 border border-border/60">
+                    <div>
+                      <span className="text-xs font-bold block">משטח שק סומסום</span>
+                      <span className="text-[9px] text-muted-foreground">70 יח' במשטח</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: Math.max(0, p.sumsumSmallPallets - 1) }))} className="size-6 rounded-md bg-secondary grid place-items-center">
+                        <Minus className="size-3" />
+                      </button>
+                      <span className="font-black text-xs">{truckDraft.sumsumSmallPallets}</span>
+                      <button onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: p.sumsumSmallPallets + 1 }))} className="size-6 rounded-md bg-primary text-primary-foreground grid place-items-center">
+                        <Plus className="size-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={sendBeitHatitWhatsApp}
+                disabled={totalDraftBags === 0 && totalSmallPallets === 0}
+                className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg active:scale-95 transition disabled:opacity-50"
+              >
+                <Share2 className="size-4" />
+                <span>סגור משאית ושלח לוואטסאפ בית הטיט</span>
+              </button>
             </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
-                <span className="text-xs font-bold text-muted-foreground">בלות חול</span>
-                <span className="text-xl font-black text-foreground my-1">{truckDraft.sandBags}</span>
-                <div className="flex items-center justify-center gap-1.5">
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, sandBags: Math.max(0, p.sandBags - 1) }))}
-                    className="size-7 rounded-lg bg-secondary grid place-items-center"
-                  >
-                    <Minus className="size-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, sandBags: p.sandBags + 1 }))}
-                    className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
-                <span className="text-xs font-bold text-muted-foreground">בלות סומסום</span>
-                <span className="text-xl font-black text-foreground my-1">{truckDraft.sumsumBags}</span>
-                <div className="flex items-center justify-center gap-1.5">
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: Math.max(0, p.sumsumBags - 1) }))}
-                    className="size-7 rounded-lg bg-secondary grid place-items-center"
-                  >
-                    <Minus className="size-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, sumsumBags: p.sumsumBags + 1 }))}
-                    className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
-                <span className="text-xs font-bold text-muted-foreground">בלות טיט</span>
-                <span className="text-xl font-black text-foreground my-1">{truckDraft.titBags}</span>
-                <div className="flex items-center justify-center gap-1.5">
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, titBags: Math.max(0, p.titBags - 1) }))}
-                    className="size-7 rounded-lg bg-secondary grid place-items-center"
-                  >
-                    <Minus className="size-3.5" />
-                  </button>
-                  <button
-                    onClick={() => setTruckDraft((p) => ({ ...p, titBags: p.titBags + 1 }))}
-                    className="size-7 rounded-lg bg-primary text-primary-foreground grid place-items-center font-bold"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
-              </div>
+          ) : activeTab === "inventory" ? (
+            <div className="space-y-3">
+              <LiveKpiBanner orders={safePublished} />
+              <SafeBoundary>
+                <InventoryDemandCard
+                  orders={safePublished}
+                  warehouseName={
+                    selectedProfile === "oren"
+                      ? "סניף 4 החרש"
+                      : selectedProfile === "tamir"
+                        ? "סניף 1 התלמיד"
+                        : "כל המחסנים (ח. סבן)"
+                  }
+                  warehouseBranchNumber={
+                    selectedProfile === "oren" ? 4 : selectedProfile === "tamir" ? 1 : "all"
+                  }
+                  pickerName={
+                    selectedProfile === "oren"
+                      ? "אורן (סניף 4)"
+                      : selectedProfile === "tamir"
+                        ? "תמיר (סניף 1)"
+                        : "מחסנאי ח. סבן"
+                  }
+                  onLogReplenishment={(summaryText) => {
+                    pushAlert(summaryText, "success");
+                  }}
+                />
+              </SafeBoundary>
             </div>
-
-            <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
-              <span className="text-xs font-black text-muted-foreground block mb-2">
-                משטחי שקיות (אריזת יצרן בית הטיט: 70 שקיות למשטח):
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/40 border border-border/60">
-                  <div>
-                    <span className="text-xs font-bold block">משטח שק חול</span>
-                    <span className="text-[9px] text-muted-foreground">70 יח' במשטח</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: Math.max(0, p.sandSmallPallets - 1) }))}
-                      className="size-6 rounded-md bg-secondary grid place-items-center"
-                    >
-                      <Minus className="size-3" />
-                    </button>
-                    <span className="font-black text-xs">{truckDraft.sandSmallPallets}</span>
-                    <button
-                      onClick={() => setTruckDraft((p) => ({ ...p, sandSmallPallets: p.sandSmallPallets + 1 }))}
-                      className="size-6 rounded-md bg-primary text-primary-foreground grid place-items-center"
-                    >
-                      <Plus className="size-3" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between p-2 rounded-xl bg-secondary/40 border border-border/60">
-                  <div>
-                    <span className="text-xs font-bold block">משטח שק סומסום</span>
-                    <span className="text-[9px] text-muted-foreground">70 יח' במשטח</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: Math.max(0, p.sumsumSmallPallets - 1) }))}
-                      className="size-6 rounded-md bg-secondary grid place-items-center"
-                    >
-                      <Minus className="size-3" />
-                    </button>
-                    <span className="font-black text-xs">{truckDraft.sumsumSmallPallets}</span>
-                    <button
-                      onClick={() => setTruckDraft((p) => ({ ...p, sumsumSmallPallets: p.sumsumSmallPallets + 1 }))}
-                      className="size-6 rounded-md bg-primary text-primary-foreground grid place-items-center"
-                    >
-                      <Plus className="size-3" />
-                    </button>
-                  </div>
-                </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="size-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="חפש לפי לקוח, עיר, מספר הזמנה או מוצר..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-card border border-border rounded-xl py-2 pr-9 pl-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors shadow-inner"
+                />
               </div>
+
+              {filteredOrders.length === 0 ? (
+                <div className="bg-card border border-border rounded-2xl p-8 text-center space-y-2 shadow-sm">
+                  <PackageCheck className="size-10 text-muted-foreground mx-auto stroke-1" />
+                  <h3 className="text-sm font-bold text-foreground">אין הזמנות בשלב זה</h3>
+                  <p className="text-xs text-muted-foreground">כל ההזמנות לוקטו או שטרם נפתחו הזמנות חדשות.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredOrders.map((order) => (
+                    <PickerOrderCard
+                      key={order.orderId}
+                      order={order}
+                      isExpanded={!!expandedOrderIds[order.orderId]}
+                      onToggleExpand={() => toggleExpand(order.orderId)}
+                      activePicker={
+                        selectedProfile === "oren"
+                          ? "אורן (סניף 4)"
+                          : selectedProfile === "tamir"
+                            ? "תמיר (סניף 1)"
+                            : undefined
+                      }
+                      onStartPicking={(orderId, picker) => startPicking(orderId, picker)}
+                      onFinishPicking={(orderId) => finishPicking(orderId)}
+                      onReportOverrun={(orderId) => reportPickerOverrun(orderId)}
+                      onUpdateStatus={(orderId, status) => quickUpdateStatus(orderId, status)}
+                      onToggleItem={(orderId, sku) => toggleItemApproval(orderId, sku)}
+                      onApproveAll={(orderId) => approveAllItems(orderId)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
+          )}
+        </main>
+
+        {/* Bottom Navigation Bar */}
+        <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-border/80 bg-card/95 backdrop-blur-2xl px-3 py-1.5 shadow-2xl">
+          <div className="grid grid-cols-4 gap-1.5 max-w-md mx-auto">
+            <button
+              onClick={() => setActiveTab("picking")}
+              className={cn(
+                "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
+                activeTab === "picking" ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              )}
+            >
+              <div className="relative">
+                <Clock className="size-4" />
+                {tabCounts.active > 0 && (
+                  <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-amber-500 text-slate-950">
+                    {tabCounts.active}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-black mt-0.5">לליקוט</span>
+            </button>
 
             <button
-              onClick={sendBeitHatitWhatsApp}
-              disabled={totalDraftBags === 0 && totalSmallPallets === 0}
-              className="w-full h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg active:scale-95 transition disabled:opacity-50"
+              onClick={() => setActiveTab("ready")}
+              className={cn(
+                "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
+                activeTab === "ready" ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              )}
             >
-              <Share2 className="size-4" />
-              <span>סגור משאית ושלח לוואטסאפ בית הטיט</span>
+              <div className="relative">
+                <Truck className="size-4" />
+                {tabCounts.ready > 0 && (
+                  <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-emerald-500 text-white">
+                    {tabCounts.ready}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-black mt-0.5">בהעמסה</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("inventory")}
+              className={cn(
+                "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
+                activeTab === "inventory" ? "bg-primary text-primary-foreground shadow-md" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+              )}
+            >
+              <Boxes className="size-4" />
+              <span className="text-[10px] font-black mt-0.5">מלאי מגרש</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab("truck_builder")}
+              className={cn(
+                "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative border border-amber-500/30",
+                activeTab === "truck_builder" ? "bg-amber-500 text-slate-950 font-black shadow-md" : "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
+              )}
+            >
+              <div className="relative">
+                <Layers className="size-4" />
+                {totalDraftBags > 0 && (
+                  <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-rose-500 text-white">
+                    {totalDraftBags}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-black mt-0.5">בית הטיט</span>
             </button>
           </div>
-        ) : activeTab === "inventory" ? (
-          <div className="space-y-3">
-            <LiveKpiBanner orders={safePublished} />
-            <InventoryDemandCard
-              orders={safePublished}
-              warehouseName={
-                selectedProfile === "oren"
-                  ? "סניף 4 החורש"
-                  : selectedProfile === "tamir"
-                    ? "סניף 1 התלמיד"
-                    : "כל המחסנים (ח. סבן)"
-              }
-              warehouseBranchNumber={
-                selectedProfile === "oren" ? 4 : selectedProfile === "tamir" ? 1 : "all"
-              }
-              pickerName={
-                selectedProfile === "oren"
-                  ? "אורן (סניף 4)"
-                  : selectedProfile === "tamir"
-                    ? "תמיר (סניף 1)"
-                    : "מחסנאי ח. סבן"
-              }
-              onLogReplenishment={(summaryText) => {
-                pushAlert(summaryText, "success");
-              }}
-            />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="size-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="חפש לפי לקוח, עיר, מספר הזמנה או מוצר..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-card border border-border rounded-xl py-2 pr-9 pl-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors shadow-inner"
-              />
-            </div>
-
-            {filteredOrders.length === 0 ? (
-              <div className="bg-card border border-border rounded-2xl p-8 text-center space-y-2 shadow-sm">
-                <PackageCheck className="size-10 text-muted-foreground mx-auto stroke-1" />
-                <h3 className="text-sm font-bold text-foreground">אין הזמנות בשלב זה</h3>
-                <p className="text-xs text-muted-foreground">כל ההזמנות לוקטו או שטרם נפתחו הזמנות חדשות.</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredOrders.map((order) => (
-                  <PickerOrderCard
-                    key={order.orderId}
-                    order={order}
-                    isExpanded={!!expandedOrderIds[order.orderId]}
-                    onToggleExpand={() => toggleExpand(order.orderId)}
-                    activePicker={
-                      selectedProfile === "oren"
-                        ? "אורן (סניף 4)"
-                        : selectedProfile === "tamir"
-                          ? "תמיר (סניף 1)"
-                          : undefined
-                    }
-                    onStartPicking={(orderId, picker) => startPicking(orderId, picker)}
-                    onFinishPicking={(orderId) => finishPicking(orderId)}
-                    onReportOverrun={(orderId) => reportPickerOverrun(orderId)}
-                    onUpdateStatus={(orderId, status) => quickUpdateStatus(orderId, status)}
-                    onToggleItem={(orderId, sku) => toggleItemApproval(orderId, sku)}
-                    onApproveAll={(orderId) => approveAllItems(orderId)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </main>
-
-      {/* Floating Bottom Navigation Bar */}
-      <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-border/80 bg-card/95 backdrop-blur-2xl px-3 py-1.5 shadow-2xl">
-        <div className="grid grid-cols-4 gap-1.5 max-w-md mx-auto">
-          <button
-            onClick={() => setActiveTab("picking")}
-            className={cn(
-              "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
-              activeTab === "picking"
-                ? "bg-primary text-primary-foreground shadow-md"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-            )}
-          >
-            <div className="relative">
-              <Clock className="size-4" />
-              {tabCounts.active > 0 && (
-                <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-amber-500 text-slate-950">
-                  {tabCounts.active}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] font-black mt-0.5">לליקוט</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("ready")}
-            className={cn(
-              "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
-              activeTab === "ready"
-                ? "bg-primary text-primary-foreground shadow-md"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-            )}
-          >
-            <div className="relative">
-              <Truck className="size-4" />
-              {tabCounts.ready > 0 && (
-                <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-emerald-500 text-white">
-                  {tabCounts.ready}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] font-black mt-0.5">בהעמסה</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("inventory")}
-            className={cn(
-              "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative",
-              activeTab === "inventory"
-                ? "bg-primary text-primary-foreground shadow-md"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
-            )}
-          >
-            <Boxes className="size-4" />
-            <span className="text-[10px] font-black mt-0.5">מלאי מגרש</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("truck_builder")}
-            className={cn(
-              "flex flex-col items-center justify-center h-12 rounded-xl transition-all duration-200 relative border border-amber-500/30",
-              activeTab === "truck_builder"
-                ? "bg-amber-500 text-slate-950 font-black shadow-md"
-                : "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
-            )}
-          >
-            <div className="relative">
-              <Layers className="size-4" />
-              {totalDraftBags > 0 && (
-                <span className="absolute -top-1 -left-2 flex size-3.5 items-center justify-center rounded-full text-[8px] font-black bg-rose-500 text-white">
-                  {totalDraftBags}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] font-black mt-0.5">בית הטיט</span>
-          </button>
-        </div>
-      </nav>
-    </div>
+        </nav>
+      </div>
+    </SafeBoundary>
   );
 }
 
@@ -935,7 +876,6 @@ function PickerOrderCard({
 
   const approvedCount = (order?.items || []).filter((i) => i?.isApproved).length;
   const totalItems = (order?.items || []).length;
-  const allItemsChecked = totalItems > 0 && approvedCount === totalItems;
 
   const formatTimer = (secs: number) => {
     const abs = Math.abs(secs);
@@ -944,8 +884,8 @@ function PickerOrderCard({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const isHikmat = (order?.driver || "").includes("חכמת");
-  const isAli = (order?.driver || "").includes("עלי");
+  const isHikmat = String(order?.driver || "").includes("חכמת");
+  const isAli = String(order?.driver || "").includes("עלי");
 
   return (
     <div
@@ -968,9 +908,7 @@ function PickerOrderCard({
             <Flame className="size-4 text-amber-300 fill-amber-300" />
             <span>חריגת ליקוט חמורה! (SLA יעד 20 דק' נחצה)</span>
           </div>
-          <span className="font-mono bg-rose-700 px-2 py-0.5 rounded">
-            +{formatTimer(remainingSeconds)}
-          </span>
+          <span className="font-mono bg-rose-700 px-2 py-0.5 rounded">+{formatTimer(remainingSeconds)}</span>
         </div>
       )}
 
@@ -1042,23 +980,12 @@ function PickerOrderCard({
         </div>
 
         {order?.status === "בהכנה" && (
-          <div
-            className={cn(
-              "rounded-xl p-2.5 border flex items-center justify-between gap-2 shadow-inner",
-              isOverrun
-                ? "bg-rose-950/30 border-rose-500/60 text-rose-300"
-                : "bg-amber-950/20 border-amber-500/50 text-amber-500",
-            )}
-          >
+          <div className={cn("rounded-xl p-2.5 border flex items-center justify-between gap-2 shadow-inner", isOverrun ? "bg-rose-950/30 border-rose-500/60 text-rose-300" : "bg-amber-950/20 border-amber-500/50 text-amber-500")}>
             <div className="flex items-center gap-2">
               <Timer className="size-4" />
-              <span className="text-xs font-bold">
-                {isOverrun ? "חריגה מ-20 דקות!" : "זמן נותר לליקוט (SLA 20 דק'):"}
-              </span>
+              <span className="text-xs font-bold">{isOverrun ? "חריגה מ-20 דקות!" : "זמן נותר לליקוט (SLA 20 דק'):"}</span>
             </div>
-            <span className="font-mono font-black text-sm">
-              {isOverrun ? `-${formatTimer(remainingSeconds)}` : formatTimer(remainingSeconds)}
-            </span>
+            <span className="font-mono font-black text-sm">{isOverrun ? `-${formatTimer(remainingSeconds)}` : formatTimer(remainingSeconds)}</span>
           </div>
         )}
 
@@ -1081,11 +1008,7 @@ function PickerOrderCard({
             <div className="mt-2 space-y-1.5 bg-secondary/30 rounded-xl p-2 border border-border">
               <div className="flex items-center justify-between pb-1 mb-1 border-b border-border text-[10px] text-muted-foreground">
                 <span>לחץ על פריט כדי לאשר ליקוט</span>
-                <button
-                  type="button"
-                  onClick={() => onApproveAll(order.orderId)}
-                  className="text-primary hover:underline font-bold"
-                >
+                <button type="button" onClick={() => onApproveAll(order.orderId)} className="text-primary hover:underline font-bold">
                   סמן הכל כאושר
                 </button>
               </div>
@@ -1096,26 +1019,18 @@ function PickerOrderCard({
                   onClick={() => onToggleItem(order.orderId, item.sku)}
                   className={cn(
                     "flex items-center justify-between p-2 rounded-xl cursor-pointer transition-all select-none text-xs border active:scale-[0.99]",
-                    item.isApproved
-                      ? "bg-emerald-500/10 border-emerald-500/30 text-muted-foreground"
-                      : "bg-card border-border text-foreground shadow-sm",
+                    item.isApproved ? "bg-emerald-500/10 border-emerald-500/30 text-muted-foreground" : "bg-card border-border text-foreground shadow-sm",
                   )}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    {item.isApproved ? (
-                      <CheckSquare className="size-4 text-emerald-500 shrink-0" />
-                    ) : (
-                      <Square className="size-4 text-muted-foreground shrink-0" />
-                    )}
+                    {item.isApproved ? <CheckSquare className="size-4 text-emerald-500 shrink-0" /> : <Square className="size-4 text-muted-foreground shrink-0" />}
                     <span className={cn("font-medium leading-tight", item.isApproved && "line-through opacity-70")}>
                       {item.name}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="font-mono font-bold text-amber-500">
-                      {item.quantity} {item.unit || "יח'"}
-                    </span>
+                    <span className="font-mono font-bold text-amber-500">{item.quantity} {item.unit || "יח'"}</span>
                     <span className="text-[9px] font-mono text-muted-foreground">#{item.sku}</span>
                   </div>
                 </div>
