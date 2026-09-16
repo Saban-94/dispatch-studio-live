@@ -89,8 +89,8 @@ export function ProductSlide({
     if (isPaused || items.length <= 1) return;
 
     const tickMs = 100;
-    const totalMs = Math.max(3000, intervalSeconds * 1000);
-    const step = (tickMs / totalMs) * 100;
+    const totalMs = Math.max(3000, intervalSeconds * 1500);
+    const step = (tickMs / totalMs) * 150;
 
     const timer = setInterval(() => {
       setProgress((prev) => {
