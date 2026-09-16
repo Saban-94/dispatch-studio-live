@@ -364,6 +364,320 @@ export const ARTERIAL_ROUTES: TrafficRouteInfo[] = [
   },
 ];
 
+export interface TrafficAlert {
+  id: string;
+  road: string;
+  type: "HEAVY" | "MODERATE" | "INCIDENT" | "FLOWING";
+  message: string;
+  time: string;
+  truckAffected?: string;
+  corridorKeywords?: string[];
+}
+
+export interface WarehouseLocation {
+  id: string;
+  name: string;
+  shortName: string;
+  city: string;
+  address: string;
+  coordinates: { lat: number; lon: number };
+}
+
+export const WAREHOUSE_ORIGINS: WarehouseLocation[] = [
+  {
+    id: "w4",
+    name: "מחסן 4 החרש (כפר סבא)",
+    shortName: "מחסן 4 החרש",
+    city: "כפר סבא",
+    address: "רחוב החרש 8, כפר סבא",
+    coordinates: { lat: 32.1785, lon: 34.9125 },
+  },
+  {
+    id: "w1",
+    name: "מחסן 1 התלמיד (הוד השרון)",
+    shortName: "מחסן 1 התלמיד",
+    city: "הוד השרון",
+    address: "רחוב התלמיד, הוד השרון",
+    coordinates: { lat: 32.155, lon: 34.898 },
+  },
+  {
+    id: "w-center",
+    name: 'מרלו"ג רמלה / שפלה',
+    shortName: 'מרלו"ג רמלה',
+    city: "רמלה",
+    address: "אזור תעשייה רמלה / צומת תעבורה",
+    coordinates: { lat: 31.928, lon: 34.869 },
+  },
+];
+
+export const SAMPLE_TRAFFIC_ALERTS: TrafficAlert[] = [
+  {
+    id: "1",
+    road: "כביש 531 מערב",
+    type: "HEAVY",
+    message: "עומס תנועה כבד ממחלף סוקולוב עד רעננה דרום. עיכוב משוער של 18 דקות.",
+    time: "לפני 3 דק'",
+    truckAffected: "חכמת (מנוף)",
+    corridorKeywords: ["531", "רעננה", "הרצליה", "סוקולוב"],
+  },
+  {
+    id: "2",
+    road: "כביש 4 צפון",
+    type: "MODERATE",
+    message: "תנועה עמוסה מגשר מורשה עד צומת רעננה מרכז. מומלץ מעקף דרך כביש 40.",
+    time: "לפני 7 דק'",
+    truckAffected: "עלי (משאית)",
+    corridorKeywords: ["כביש 4", "מורשה", "רעננה", "נתניה"],
+  },
+  {
+    id: "3",
+    road: "אזור תעשייה כפר סבא",
+    type: "INCIDENT",
+    message: 'עבודות תשתית ברחוב התע"ש. גישה מוגבלת למשאיות מעל 15 טון.',
+    time: "לפני 12 דק'",
+    corridorKeywords: ["כפר סבא", "התעש", "החרש"],
+  },
+  {
+    id: "4",
+    road: "כביש 5 מזרח",
+    type: "FLOWING",
+    message: "התנועה זורמת ללא עיכובים ממחלף גלילות עד קסם וראש העין.",
+    time: "עכשיו",
+    corridorKeywords: ["כביש 5", "קסם", "פתח תקווה", "ראש העין"],
+  },
+  {
+    id: "5",
+    road: "כביש 1 עליות ירושלים",
+    type: "MODERATE",
+    message: "עומס בינוני בלטרון ושער הגיא לכיוון גינות סחרוב. עיכוב כ-14 דקות.",
+    time: "לפני 5 דק'",
+    truckAffected: "סעיד (סמיטריילר)",
+    corridorKeywords: ["כביש 1", "ירושלים", "שער הגיא", "לטרון"],
+  },
+  {
+    id: "6",
+    road: "כביש 40 עוקף רמלה",
+    type: "HEAVY",
+    message: "פקק מתמשך מצומת אחיסמך לצומת רמלה. עיכוב כ-22 דקות.",
+    time: "לפני 9 דק'",
+    truckAffected: "איציק (דבל בלה)",
+    corridorKeywords: ["כביש 40", "רמלה", "לוד", "אחיסמך"],
+  },
+];
+
+export interface CommonDestinationConfig {
+  id: string;
+  destination: string;
+  region: string;
+  primaryRoad: string;
+  corridorKeywords: string[];
+  baseDistanceKmByOrigin: Record<string, number>;
+  baseMinutesByOrigin: Record<string, number>;
+  recommendedAltRoute?: string;
+  wazeSearchQuery: string;
+}
+
+export const COMMON_DESTINATIONS: CommonDestinationConfig[] = [
+  {
+    id: "raanana",
+    destination: "רעננה — אזור תעשייה ומסחר",
+    region: "שרון",
+    primaryRoad: "כביש 531 מערב",
+    corridorKeywords: ["531", "רעננה", "סוקולוב"],
+    baseDistanceKmByOrigin: { w4: 8, w1: 6, "w-center": 34 },
+    baseMinutesByOrigin: { w4: 12, w1: 10, "w-center": 38 },
+    recommendedAltRoute: "מעקף דרך כביש 541 (רח' ויצמן) או כביש 4",
+    wazeSearchQuery: "רעננה אזור תעשייה",
+  },
+  {
+    id: "herzliya",
+    destination: "הרצליה פיתוח ואזור החוף",
+    region: "שרון / מרכז",
+    primaryRoad: "כביש 531 מערב ⟵ כביש 20",
+    corridorKeywords: ["531", "הרצליה", "20", "איילון"],
+    baseDistanceKmByOrigin: { w4: 15, w1: 13, "w-center": 32 },
+    baseMinutesByOrigin: { w4: 18, w1: 16, "w-center": 36 },
+    recommendedAltRoute: "מעקף דרך כביש 2 (מחלף הסירה) או כביש 5",
+    wazeSearchQuery: "הרצליה פיתוח",
+  },
+  {
+    id: "petah-tikva",
+    destination: "פתח תקווה — פארק אפק / קסם",
+    region: "מרכז",
+    primaryRoad: "כביש 40 ⟵ כביש 5 מזרח",
+    corridorKeywords: ["כביש 5", "קסם", "פתח תקווה", "ראש העין"],
+    baseDistanceKmByOrigin: { w4: 14, w1: 12, "w-center": 22 },
+    baseMinutesByOrigin: { w4: 18, w1: 15, "w-center": 26 },
+    recommendedAltRoute: "דרך כביש 471 או ציר 444",
+    wazeSearchQuery: "פארק אפק ראש העין פתח תקווה",
+  },
+  {
+    id: "tel-aviv",
+    destination: "תל אביב מרכז / אתרי בנייה",
+    region: "גוש דן",
+    primaryRoad: "כביש 4 דרום ⟵ מחלף גהה",
+    corridorKeywords: ["כביש 4", "גהה", "מורשה", "תל אביב"],
+    baseDistanceKmByOrigin: { w4: 22, w1: 20, "w-center": 24 },
+    baseMinutesByOrigin: { w4: 25, w1: 22, "w-center": 28 },
+    recommendedAltRoute: "דרך ציר נמיר או כביש 5 לגלילות",
+    wazeSearchQuery: "תל אביב מרכז",
+  },
+  {
+    id: "netanya",
+    destination: "נתניה — אזור תעשייה פולג",
+    region: "שרון צפון",
+    primaryRoad: "כביש 4 צפון ⟵ כביש 553",
+    corridorKeywords: ["כביש 4", "נתניה", "פולג", "מורשה"],
+    baseDistanceKmByOrigin: { w4: 19, w1: 21, "w-center": 46 },
+    baseMinutesByOrigin: { w4: 21, w1: 23, "w-center": 48 },
+    recommendedAltRoute: "דרך כביש 2 (חוף) ממחלף נתניה דרום",
+    wazeSearchQuery: "אזור תעשייה פולג נתניה",
+  },
+  {
+    id: "rishon-holon",
+    destination: "ראשון לציון / חולון",
+    region: "מרכז / שפלה",
+    primaryRoad: "כביש 4 דרום ⟵ כביש 431",
+    corridorKeywords: ["כביש 4", "431", "ראשון", "חולון"],
+    baseDistanceKmByOrigin: { w4: 32, w1: 30, "w-center": 14 },
+    baseMinutesByOrigin: { w4: 32, w1: 30, "w-center": 16 },
+    recommendedAltRoute: "מעקף דרך כביש 20 (איילון דרום)",
+    wazeSearchQuery: "ראשון לציון אזור תעשייה",
+  },
+  {
+    id: "ramla-modiin",
+    destination: "מודיעין / רמלה / לוד",
+    region: "שפלה",
+    primaryRoad: "כביש 6 דרום ⟵ כביש 40",
+    corridorKeywords: ["כביש 6", "כביש 40", "רמלה", "לוד", "מודיעין"],
+    baseDistanceKmByOrigin: { w4: 38, w1: 36, "w-center": 8 },
+    baseMinutesByOrigin: { w4: 35, w1: 33, "w-center": 12 },
+    recommendedAltRoute: "עוקף דרך כביש 443 או כביש 431",
+    wazeSearchQuery: "רמלה אזור תעשייה",
+  },
+  {
+    id: "jerusalem",
+    destination: "ירושלים — כניסה לעיר (שער הגיא)",
+    region: "ירושלים",
+    primaryRoad: "כביש 6 דרום ⟵ כביש 1 מזרח",
+    corridorKeywords: ["כביש 1", "שער הגיא", "לטרון", "ירושלים"],
+    baseDistanceKmByOrigin: { w4: 76, w1: 74, "w-center": 48 },
+    baseMinutesByOrigin: { w4: 58, w1: 56, "w-center": 40 },
+    recommendedAltRoute: "דרך כביש 443 (מודיעין-גבעת זאב)",
+    wazeSearchQuery: "כניסה לירושלים גינות סחרוב",
+  },
+];
+
+export interface DestinationETAEstimate {
+  id: string;
+  destination: string;
+  region: string;
+  primaryRoad: string;
+  baseDistanceKm: number;
+  baseMinutes: number;
+  trafficDelayMinutes: number;
+  totalEstimatedMinutes: number;
+  etaClockTime: string;
+  trafficStatus: "FLOWING" | "MODERATE" | "HEAVY" | "INCIDENT";
+  trafficReason?: string;
+  relevantAlert?: TrafficAlert;
+  recommendedAltRoute?: string;
+  wazeUrl: string;
+}
+
+/**
+ * Calculates and returns real-time ETA estimates from a specified warehouse origin
+ * to key distribution destinations based on active traffic alerts.
+ */
+export function calculateWarehouseDestinationETAs(
+  warehouseId: string = "w4",
+  alerts: TrafficAlert[] = SAMPLE_TRAFFIC_ALERTS,
+  referenceDate: Date = new Date(),
+): DestinationETAEstimate[] {
+  const originWarehouse =
+    WAREHOUSE_ORIGINS.find((w) => w.id === warehouseId) || WAREHOUSE_ORIGINS[0];
+
+  return COMMON_DESTINATIONS.map((dest) => {
+    const baseDistanceKm =
+      dest.baseDistanceKmByOrigin[warehouseId] ?? dest.baseDistanceKmByOrigin.w4 ?? 20;
+    const baseMinutes = dest.baseMinutesByOrigin[warehouseId] ?? dest.baseMinutesByOrigin.w4 ?? 25;
+
+    // Search for traffic alerts impacting this destination's corridors
+    let matchingAlert: TrafficAlert | undefined;
+    let trafficDelayMinutes = 0;
+    let trafficStatus: DestinationETAEstimate["trafficStatus"] = "FLOWING";
+    let trafficReason: string | undefined;
+
+    for (const alert of alerts) {
+      const roadMatches = dest.corridorKeywords.some(
+        (kw) =>
+          alert.road.toLowerCase().includes(kw.toLowerCase()) ||
+          alert.message.toLowerCase().includes(kw.toLowerCase()),
+      );
+
+      if (roadMatches) {
+        matchingAlert = alert;
+
+        // Try extracting numeric delay from alert message (e.g., "עיכוב משוער של 18 דקות")
+        const delayMatch = alert.message.match(/(\d+)\s*דק/);
+        const extractedDelay = delayMatch ? parseInt(delayMatch[1], 10) : 0;
+
+        if (alert.type === "HEAVY") {
+          trafficStatus = "HEAVY";
+          trafficDelayMinutes = Math.max(extractedDelay || 18, trafficDelayMinutes);
+          trafficReason = alert.message;
+          break; // Heavy is highest priority
+        } else if (alert.type === "INCIDENT") {
+          if (trafficStatus !== "HEAVY") {
+            trafficStatus = "INCIDENT";
+            trafficDelayMinutes = Math.max(extractedDelay || 14, trafficDelayMinutes);
+            trafficReason = alert.message;
+          }
+        } else if (alert.type === "MODERATE") {
+          if (trafficStatus !== "HEAVY" && trafficStatus !== "INCIDENT") {
+            trafficStatus = "MODERATE";
+            trafficDelayMinutes = Math.max(extractedDelay || 8, trafficDelayMinutes);
+            trafficReason = alert.message;
+          }
+        } else if (alert.type === "FLOWING") {
+          if (trafficStatus === "FLOWING") {
+            trafficDelayMinutes = 0;
+            trafficReason = "תנועה זורמת ללא עיכובים";
+          }
+        }
+      }
+    }
+
+    const totalEstimatedMinutes = Math.max(5, baseMinutes + trafficDelayMinutes);
+    const etaDate = new Date(referenceDate.getTime() + totalEstimatedMinutes * 60000);
+    const etaClockTime = etaDate.toLocaleTimeString("he-IL", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const wazeUrl = `https://www.waze.com/ul?q=${encodeURIComponent(
+      dest.wazeSearchQuery,
+    )}&from=${originWarehouse.coordinates.lat},${originWarehouse.coordinates.lon}&navigate=yes`;
+
+    return {
+      id: dest.id,
+      destination: dest.destination,
+      region: dest.region,
+      primaryRoad: dest.primaryRoad,
+      baseDistanceKm,
+      baseMinutes,
+      trafficDelayMinutes,
+      totalEstimatedMinutes,
+      etaClockTime,
+      trafficStatus,
+      trafficReason,
+      relevantAlert: matchingAlert,
+      recommendedAltRoute: trafficDelayMinutes >= 8 ? dest.recommendedAltRoute : undefined,
+      wazeUrl,
+    };
+  });
+}
+
 export function calculateDriverETAs(orders: Order[]): DriverETAInfo[] {
   const activeOrders = orders.filter((o) => o.status === "יצא לדרך" || o.status === "בהעמסה");
 

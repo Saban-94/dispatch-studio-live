@@ -50,6 +50,7 @@ import {
   setVoiceAnnounceEnabled,
   subscribeVoiceStatus,
   testVoiceAnnouncement,
+  stopSpeaking,
 } from "@/services/voiceAlertService";
 
 const DEFAULT_SCREENSAVER_SETTINGS: ScreensaverSettings = {
@@ -271,6 +272,7 @@ interface DispatchContextValue extends DispatchState {
   isVoiceSpeaking: boolean;
   triggerVoiceTest: () => Promise<void>;
   speakUrgentAlert: (text: string) => Promise<void>;
+  stopSpeakingVoice: () => void;
 }
 
 const DispatchContext = createContext<DispatchContextValue | null>(null);
@@ -934,7 +936,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
         // 1. Brand new order detected from Google Sheets!
         if (!before) {
           recordOrderChange(order.orderId);
-          const msg = `הזמנה חדשה התקבלה! #${order.orderId} עבור ${order.customerName} (${order.city})`;
+          const msg = `התקבלה הזמנה בסידור! #${order.orderId} עבור ${order.customerName} (${order.city})`;
           setLatestOrderEvent({
             type: "new_order",
             orderId: order.orderId,
@@ -949,7 +951,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
           // If brand new order is urgent/high priority, announce it in Hebrew
           if (isHighPriorityUrgentOrder(order)) {
             speakHebrew(
-              `התקבלה הזמנה דחופה חדשה! מספר ${order.orderId}, עבור ${order.customerName}, סבב ${order.round}.`,
+              `התקבלה הזמנה בסידור! מספר ${order.orderId}, עבור ${order.customerName}, סבב ${order.round}.`,
             );
           }
           return;
@@ -1589,6 +1591,7 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
     isVoiceSpeaking: voiceSpeaking,
     triggerVoiceTest: testVoiceAnnouncement,
     speakUrgentAlert: speakHebrew,
+    stopSpeakingVoice: stopSpeaking,
   };
 
   return <DispatchContext.Provider value={value}>{children}</DispatchContext.Provider>;

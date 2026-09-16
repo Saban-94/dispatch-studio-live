@@ -29,13 +29,19 @@ import {
   ExternalLink,
   Folder,
   Presentation,
+  Sliders,
+  X,
 } from "lucide-react";
 import { useDispatchBoard } from "@/context/DispatchContext";
+import { useAdminControl } from "@/context/AdminControlContext";
 import { computeProductAnalytics, getDailyInventoryInsights } from "@/services/analyticsService";
 import { ARTERIAL_ROUTES, calculateDriverETAs } from "@/services/trafficService";
 import { LowStockBadge } from "@/components/inventory/LowStockBadge";
+import TrafficLiveDashboard from "@/components/traffic/TrafficLiveDashboard";
 import { DriveMediaPlayer } from "./DriveMediaPlayer";
 import { InventoryAlertSlide } from "./InventoryAlertSlide";
+import { ProductSlide } from "./ProductSlide";
+import { ScreensaverAdminPanel } from "@/components/admin/ScreensaverAdminPanel";
 import type { ScreensaverMode } from "@/types/screensaver";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +69,13 @@ export const SCREENSAVER_MODES: {
   category: "alert" | "media" | "ops";
 }[] = [
   {
+    id: "product_slide",
+    label: "שקופיות מוצר חי (Carousel)",
+    shortLabel: "סבב מוצרים",
+    badge: "מוצר חי",
+    category: "alert",
+  },
+  {
     id: "INVENTORY_ALERT",
     label: "דוח משיכת מלאי (עמודה H)",
     shortLabel: "משיכת מלאי חי",
@@ -70,25 +83,11 @@ export const SCREENSAVER_MODES: {
     category: "alert",
   },
   {
-    id: "drive_media",
-    label: "מדיה ומצגות מ-Drive",
-    shortLabel: "מדיה Drive",
-    badge: "הדרכה ווידאו",
-    category: "media",
-  },
-  {
     id: "STOCK_ALERT",
     label: "התראות רכש ומלאי מוגבר",
     shortLabel: "התראות רכש",
     badge: "מלאי מוגבר",
     category: "alert",
-  },
-  {
-    id: "video",
-    label: "וידאו לוגיסטיקה ואווירה",
-    shortLabel: "וידאו אווירה",
-    badge: "הפוגה מבצעית",
-    category: "media",
   },
   {
     id: "analytics",
@@ -103,6 +102,20 @@ export const SCREENSAVER_MODES: {
     shortLabel: "צירי תנועה",
     badge: "צי רכבים",
     category: "ops",
+  },
+  {
+    id: "drive_media",
+    label: "מדיה ומצגות מ-Drive",
+    shortLabel: "מדיה Drive",
+    badge: "הדרכה ווידאו",
+    category: "media",
+  },
+  {
+    id: "video",
+    label: "וידאו לוגיסטיקה ואווירה",
+    shortLabel: "וידאו אווירה",
+    badge: "הפוגה מבצעית",
+    category: "media",
   },
 ];
 
@@ -148,7 +161,13 @@ export function DispatchScreensaver() {
     syncNow,
   } = useDispatchBoard();
 
-  const [activeTab, setActiveTab] = useState<ScreensaverMode>("INVENTORY_ALERT");
+  const { settings: adminSettings, activeSlides } = useAdminControl();
+  const [showAdminModal, setShowAdminModal] = useState(false);
+
+  // Initialize active tab from first active slide if possible
+  const [activeTab, setActiveTab] = useState<ScreensaverMode>(() => {
+    return (activeSlides[0]?.id as ScreensaverMode) || "product_slide";
+  });
   const [selectedVideoTheme, setSelectedVideoTheme] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState<string>("");
@@ -189,7 +208,10 @@ export function DispatchScreensaver() {
   // Active inventory insight index when on STOCK_ALERT slide
   const [activeStockIndex, setActiveStockIndex] = useState(0);
 
-  const cycleDurationSec = screensaverSettings.cycleIntervalSeconds || 14;
+  // Determine current slide duration from adminSettings or fallback
+  const currentSlideConfig = activeSlides.find((s) => s.id === activeTab);
+  const currentSlideDurationSec =
+    currentSlideConfig?.durationSeconds || screensaverSettings.cycleIntervalSeconds || 12;
 
   // Handler to switch tabs and reset the progress bar
   const handleSelectTab = useCallback((mode: ScreensaverMode) => {
@@ -197,31 +219,39 @@ export function DispatchScreensaver() {
     setCycleProgress(0);
   }, []);
 
-  // Handler to trigger next slide immediately
+  // Handler to trigger next slide immediately using configured active slides
   const handleNextSlide = useCallback(() => {
     setActiveTab((currTab) => {
-      const currentIdx = SCREENSAVER_MODES.findIndex((m) => m.id === currTab);
-      const nextIdx = (currentIdx + 1) % SCREENSAVER_MODES.length;
-      return SCREENSAVER_MODES[nextIdx].id;
+      const available =
+        activeSlides.length > 0
+          ? activeSlides.map((s) => s.id as ScreensaverMode)
+          : SCREENSAVER_MODES.map((m) => m.id);
+      const currentIdx = available.indexOf(currTab);
+      const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % available.length;
+      return available[nextIdx];
     });
     setCycleProgress(0);
-  }, []);
+  }, [activeSlides]);
 
-  // Auto-cycle through views with smooth progress tracking
+  // Auto-cycle through views with smooth progress tracking and per-slide duration
   useEffect(() => {
     if (!isScreensaverActive || !screensaverSettings.autoCycle || isCyclePaused) return;
 
     const intervalMs = 150;
-    const stepIncrement = (intervalMs / (cycleDurationSec * 1000)) * 100;
+    const stepIncrement = (intervalMs / (currentSlideDurationSec * 1000)) * 100;
 
     const timer = setInterval(() => {
       setCycleProgress((prev) => {
         if (prev + stepIncrement >= 100) {
           // Switch to next tab smoothly
           setActiveTab((currTab) => {
-            const currentIdx = SCREENSAVER_MODES.findIndex((m) => m.id === currTab);
-            const nextIdx = (currentIdx + 1) % SCREENSAVER_MODES.length;
-            return SCREENSAVER_MODES[nextIdx].id;
+            const available =
+              activeSlides.length > 0
+                ? activeSlides.map((s) => s.id as ScreensaverMode)
+                : SCREENSAVER_MODES.map((m) => m.id);
+            const currentIdx = available.indexOf(currTab);
+            const nextIdx = currentIdx === -1 ? 0 : (currentIdx + 1) % available.length;
+            return available[nextIdx];
           });
           return 0;
         }
@@ -230,7 +260,13 @@ export function DispatchScreensaver() {
     }, intervalMs);
 
     return () => clearInterval(timer);
-  }, [isScreensaverActive, screensaverSettings.autoCycle, isCyclePaused, cycleDurationSec]);
+  }, [
+    isScreensaverActive,
+    screensaverSettings.autoCycle,
+    isCyclePaused,
+    currentSlideDurationSec,
+    activeSlides,
+  ]);
 
   // Auto-advance products within STOCK_ALERT every 7 seconds
   useEffect(() => {
@@ -300,89 +336,67 @@ export function DispatchScreensaver() {
             </div>
           </div>
 
-          {/* Mode Selector Tabs */}
-          <div className="flex items-center gap-1 rounded-xl bg-slate-800/80 p-1 ring-1 ring-slate-700/60">
-            <button
-              onClick={() => setActiveTab("INVENTORY_ALERT")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition relative",
-                activeTab === "INVENTORY_ALERT"
-                  ? "bg-amber-600 text-white shadow-sm ring-1 ring-amber-400"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <Flame className="size-4 text-amber-400" />
-              <span>🚨 משיכת מלאי (עמודה H)</span>
-              <span className="size-2 rounded-full bg-red-500 animate-ping absolute -top-1 -right-1" />
-            </button>
-            <button
-              onClick={() => setActiveTab("analytics")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition",
-                activeTab === "analytics"
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <Activity className="size-4" />
-              <span>ביצועים ומותגי סבן</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("STOCK_ALERT")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition relative",
-                activeTab === "STOCK_ALERT"
-                  ? "bg-amber-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <AlertTriangle className="size-4 text-amber-400" />
-              <span>התראות מלאי ורכש</span>
-              {inventoryInsights.some((i) => i.alertLevel === "HIGH") && (
-                <span className="size-2 rounded-full bg-red-500 animate-ping absolute -top-1 -right-1" />
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab("drive_media")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition relative",
-                activeTab === "drive_media"
-                  ? "bg-purple-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <Folder className="size-4 text-purple-400" />
-              <span>מדיה מדרייב (וידאו ומצגות)</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("traffic")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition",
-                activeTab === "traffic"
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <Navigation className="size-4" />
-              <span>מצב פקקים וצפי הגעה</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("video")}
-              className={cn(
-                "flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-bold transition",
-                activeTab === "video"
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white",
-              )}
-            >
-              <Film className="size-4" />
-              <span>וידאו הפוגה בלופ</span>
-            </button>
+          {/* Mode Selector Tabs (Dynamic based on Admin settings) */}
+          <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-800/80 p-1 ring-1 ring-slate-700/60 max-w-2xl scrollbar-none">
+            {activeSlides.map((slide) => {
+              const isSel = activeTab === slide.id;
+              const isProduct = slide.id === "product_slide";
+              const isInv = slide.id === "INVENTORY_ALERT";
+              const isStock = slide.id === "STOCK_ALERT";
+              const isDrive = slide.id === "drive_media";
+
+              return (
+                <button
+                  key={slide.id}
+                  onClick={() => handleSelectTab(slide.id as ScreensaverMode)}
+                  className={cn(
+                    "flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold transition relative shrink-0",
+                    isSel
+                      ? isDrive
+                        ? "bg-purple-600 text-white shadow-sm ring-1 ring-purple-400"
+                        : isInv || isStock
+                          ? "bg-amber-600 text-white shadow-sm ring-1 ring-amber-400"
+                          : isProduct
+                            ? "bg-primary text-primary-foreground shadow-sm ring-1 ring-primary"
+                            : "bg-blue-600 text-white shadow-sm ring-1 ring-blue-400"
+                      : "text-slate-400 hover:text-white hover:bg-slate-700/50",
+                  )}
+                  title={slide.title}
+                >
+                  {isProduct && <Package className="size-4 text-emerald-400" />}
+                  {isInv && <Flame className="size-4 text-amber-400" />}
+                  {isStock && <AlertTriangle className="size-4 text-amber-400" />}
+                  {slide.id === "analytics" && <Activity className="size-4 text-sky-400" />}
+                  {slide.id === "traffic" && <Navigation className="size-4 text-blue-400" />}
+                  {isDrive && <Folder className="size-4 text-purple-400" />}
+                  {slide.id === "video" && <Film className="size-4 text-indigo-400" />}
+
+                  <span>{slide.title}</span>
+
+                  {isProduct && (
+                    <span className="size-2 rounded-full bg-emerald-400 animate-ping absolute -top-1 -right-1" />
+                  )}
+                  {isInv && (
+                    <span className="size-2 rounded-full bg-rose-500 animate-ping absolute -top-1 -right-1" />
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          {/* Right Clock & Dismiss button */}
-          <div className="flex items-center gap-4">
-            <div className="text-left">
+          {/* Right Clock, Settings & Dismiss button */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowAdminModal(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/90 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700 hover:text-white transition shadow-sm"
+              title="ניהול שומר מסך וסבב שקופיות"
+              id="btn-open-screensaver-admin-modal"
+            >
+              <Sliders className="size-4 text-primary" />
+              <span className="hidden sm:inline">ניהול סבב</span>
+            </button>
+
+            <div className="text-left hidden md:block">
               <div className="text-2xl font-black tabular-nums tracking-wide text-white">
                 {currentTime}
               </div>
@@ -618,6 +632,26 @@ export function DispatchScreensaver() {
               </motion.div>
             )}
 
+            {activeTab === "product_slide" && (
+              <motion.div
+                key="product-slide-carousel-view"
+                variants={screensaverCrossFadeVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="h-full flex-1"
+              >
+                <ProductSlide
+                  orders={published}
+                  intervalSeconds={adminSettings.productSlideIntervalSeconds}
+                  branchFilter={adminSettings.branchFilter}
+                  prioritizeCritical={adminSettings.prioritizeCriticalProducts}
+                  pauseOnHover={adminSettings.pauseOnHover}
+                  onCyclePauseChange={setIsCyclePaused}
+                />
+              </motion.div>
+            )}
+
             {activeTab === "INVENTORY_ALERT" && (
               <motion.div
                 key="inventory-alert-view"
@@ -627,7 +661,11 @@ export function DispatchScreensaver() {
                 transition={{ duration: 0.35 }}
                 className="h-full flex-1"
               >
-                <InventoryAlertSlide orders={published} onRefresh={syncNow} />
+                <InventoryAlertSlide
+                  orders={published}
+                  onRefresh={syncNow}
+                  branchFilter={adminSettings.branchFilter}
+                />
               </motion.div>
             )}
 
@@ -847,74 +885,75 @@ export function DispatchScreensaver() {
                 transition={{ duration: 0.3 }}
                 className="space-y-6"
               >
-                {/* Traffic summary banner */}
-                <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-blue-950/40 p-4 shadow-lg">
-                  <div className="flex items-center gap-3">
-                    <Navigation className="size-6 text-blue-400" />
-                    <div>
-                      <h3 className="text-base font-black text-white">
-                        מצב צירי תחבורה ארציים — רמלה, ירושלים, גוש דן
-                      </h3>
-                      <p className="text-xs text-slate-300">
-                        עדכון תנועה חי למשאיות ח. סבן על פי דיווחי שטח
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs font-semibold text-slate-300 bg-slate-900/80 px-3 py-1.5 rounded-lg border border-slate-700">
-                    המלצת מוקד: {targetedBriefings.trafficAdvice}
-                  </div>
-                </div>
+                {/* Real-time Waze Traffic & Warehouse Destination ETA Dashboard */}
+                <TrafficLiveDashboard />
 
                 {/* Israeli Arterial Roads Radar Cards */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {ARTERIAL_ROUTES.map((route) => (
-                    <div
-                      key={route.id}
-                      className={cn(
-                        "rounded-2xl border p-4 shadow-md transition",
-                        route.status === "heavy"
-                          ? "border-red-500/40 bg-red-950/20"
-                          : route.status === "moderate"
-                            ? "border-amber-500/40 bg-amber-950/20"
-                            : "border-slate-800 bg-slate-900/60",
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-lg font-black text-white">{route.road}</span>
-                        <span
-                          className={cn(
-                            "rounded-full px-2.5 py-0.5 text-xs font-bold ring-1",
-                            route.status === "heavy"
-                              ? "bg-red-500/20 text-red-400 ring-red-500/30"
-                              : route.status === "moderate"
-                                ? "bg-amber-500/20 text-amber-400 ring-amber-500/30"
-                                : "bg-emerald-500/20 text-emerald-400 ring-emerald-500/30",
-                          )}
-                        >
-                          {route.statusText}
-                        </span>
-                      </div>
-
-                      <div className="mt-2 text-xs font-medium text-slate-300">{route.segment}</div>
-
-                      <div className="mt-3 flex items-center justify-between border-t border-slate-800/80 pt-2 text-xs">
-                        <span className="text-slate-400">עיכוב משוער:</span>
-                        <span className="font-bold text-white tabular-nums">
-                          {route.delayMinutes > 0 ? `+${route.delayMinutes} דק'` : "ללא עיכוב"}
-                        </span>
-                        <span className="text-slate-400">מהירות ממוצעת:</span>
-                        <span className="font-bold text-white tabular-nums">
-                          {route.avgSpeedKmh} קמ״ש
-                        </span>
-                      </div>
-
-                      {route.alert && (
-                        <div className="mt-2 rounded-lg bg-amber-500/10 p-2 text-[11px] font-semibold text-amber-300">
-                          {route.alert}
-                        </div>
-                      )}
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 shadow-lg space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Navigation className="size-5 text-blue-400" />
+                      <h4 className="text-base font-black text-white">
+                        מצב צירי תחבורה ארציים — מכ״ם עומסים (כביש 1, 6, 4, 40, 431)
+                      </h4>
                     </div>
-                  ))}
+                    <div className="text-xs font-semibold text-slate-300 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+                      המלצת מוקד: {targetedBriefings.trafficAdvice}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {ARTERIAL_ROUTES.map((route) => (
+                      <div
+                        key={route.id}
+                        className={cn(
+                          "rounded-2xl border p-4 shadow-md transition",
+                          route.status === "heavy"
+                            ? "border-red-500/40 bg-red-950/20"
+                            : route.status === "moderate"
+                              ? "border-amber-500/40 bg-amber-950/20"
+                              : "border-slate-800 bg-slate-900/60",
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-lg font-black text-white">{route.road}</span>
+                          <span
+                            className={cn(
+                              "rounded-full px-2.5 py-0.5 text-xs font-bold ring-1",
+                              route.status === "heavy"
+                                ? "bg-red-500/20 text-red-400 ring-red-500/30"
+                                : route.status === "moderate"
+                                  ? "bg-amber-500/20 text-amber-400 ring-amber-500/30"
+                                  : "bg-emerald-500/20 text-emerald-400 ring-emerald-500/30",
+                            )}
+                          >
+                            {route.statusText}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 text-xs font-medium text-slate-300">
+                          {route.segment}
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between border-t border-slate-800/80 pt-2 text-xs">
+                          <span className="text-slate-400">עיכוב משוער:</span>
+                          <span className="font-bold text-white tabular-nums">
+                            {route.delayMinutes > 0 ? `+${route.delayMinutes} דק'` : "ללא עיכוב"}
+                          </span>
+                          <span className="text-slate-400">מהירות ממוצעת:</span>
+                          <span className="font-bold text-white tabular-nums">
+                            {route.avgSpeedKmh} קמ״ש
+                          </span>
+                        </div>
+
+                        {route.alert && (
+                          <div className="mt-2 rounded-lg bg-amber-500/10 p-2 text-[11px] font-semibold text-amber-300">
+                            {route.alert}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Driver ETAs on the road */}
@@ -1099,6 +1138,30 @@ export function DispatchScreensaver() {
             </span>
           </div>
         </footer>
+
+        {/* Screensaver Admin Panel Modal Overlay */}
+        <AnimatePresence>
+          {showAdminModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ duration: 0.2 }}
+                className="relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-border bg-card p-6 shadow-2xl"
+              >
+                <button
+                  onClick={() => setShowAdminModal(false)}
+                  className="absolute top-5 left-5 grid size-9 place-items-center rounded-xl bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground transition shadow-sm z-10"
+                  aria-label="סגור חלון הגדרות"
+                >
+                  <X className="size-5" />
+                </button>
+                <ScreensaverAdminPanel onClose={() => setShowAdminModal(false)} />
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </AnimatePresence>
   );

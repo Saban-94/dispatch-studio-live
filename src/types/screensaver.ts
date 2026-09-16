@@ -1,5 +1,59 @@
 export type ScreensaverMode =
-  "analytics" | "traffic" | "video" | "mixed" | "STOCK_ALERT" | "INVENTORY_ALERT" | "drive_media";
+  | "analytics"
+  | "traffic"
+  | "video"
+  | "mixed"
+  | "STOCK_ALERT"
+  | "INVENTORY_ALERT"
+  | "drive_media"
+  | "product_slide";
+
+export type ScreensaverBranchFilter = "all" | "branch_4" | "branch_1";
+
+export interface ScreensaverSlideConfig {
+  id: ScreensaverMode;
+  title: string;
+  description: string;
+  enabled: boolean;
+  durationSeconds: number; // custom dwell time per slide
+  order: number;
+  badge?: string;
+  category: "product" | "alert" | "media" | "ops";
+}
+
+export interface ScreensaverAdminSettings {
+  slides: ScreensaverSlideConfig[];
+  branchFilter: ScreensaverBranchFilter;
+  prioritizeCriticalProducts: boolean;
+  productSlideIntervalSeconds: number; // dwell time per product slide in carousel
+  pauseOnHover: boolean;
+}
+
+export interface NormalizedProductSlideItem {
+  sku: string;
+  cleanName: string;
+  originalName: string;
+  category: string;
+  unit: string;
+  unitsPerPallet: number;
+  warehouseBranch: string; // e.g. "מגרש 4 - החרש" | "סניף 1 - התלמיד"
+  branchNumber: 1 | 4 | "all";
+  actualDrawn: number; // בהעמסה / יצא לדרך / סופק
+  reserved: number; // בסידור עבודה / בהכנה / מוכן להעמסה
+  totalDemanded: number; // סה"כ נמשך/פעיל היום
+  initialBase: number;
+  effectiveBalance: number; // Max(0, initialBase - totalDemanded)
+  safetyThreshold: number;
+  percentRemaining: number;
+  isCritical: boolean;
+  isWarning: boolean;
+  deficitToRefill: number;
+  palletsToRefill: number;
+  procurementAdvice: string; // "דרוש פול-טריילר (24 משטחים)" או "להזמין X משטחים"
+  requiresFullTrailer: boolean;
+  imageUrl: string;
+  ordersCount: number;
+}
 
 export interface ParsedProductItem {
   raw: string;
@@ -129,6 +183,10 @@ export interface ScreensaverSettings {
   videoSource: string;
   videoMuted: boolean;
   autoVideoOnLull: boolean; // switches to ambient video when no urgent warnings exist
+  adminSettings?: ScreensaverAdminSettings;
+  branchFilter?: ScreensaverBranchFilter;
+  prioritizeCritical?: boolean;
+  productSlideIntervalSeconds?: number;
 }
 
 export interface TrafficRouteInfo {

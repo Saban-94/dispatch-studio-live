@@ -16,8 +16,10 @@ import {
   Video,
   Folder,
   ExternalLink,
+  Tv,
 } from "lucide-react";
 import { useDispatchBoard } from "@/context/DispatchContext";
+import { ScreensaverAdminPanel } from "@/components/admin/ScreensaverAdminPanel";
 import type { AlertLevel } from "@/types/dispatch";
 import { cn } from "@/lib/utils";
 
@@ -378,21 +380,30 @@ export function AITrainerStudio() {
 
       {/* TAB 3: SCREENSAVER SETTINGS */}
       {activeSubTab === "screensaver" && (
-        <div className="space-y-3 text-xs">
-          {/* Active status */}
-          <div className="flex items-center justify-between rounded-xl border border-border bg-card p-3">
-            <div>
-              <div className="font-bold text-foreground">שומר מסך פעיל אוטומטית</div>
-              <div className="text-[11px] text-muted-foreground">
-                מופעל בחוסר שימוש או כשההזמנה הבאה רחוקה מהסף
+        <div className="space-y-4 text-xs">
+          {/* Quick Launch Banner */}
+          <div className="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/10 p-3">
+            <div className="flex items-center gap-2.5">
+              <Tv className="size-5 text-primary" />
+              <div>
+                <div className="font-bold text-foreground">הפעלת שומר מסך מבצעי</div>
+                <div className="text-[11px] text-muted-foreground">
+                  פתיחה מידית של שומר המסך וסבב שקופיות המוצר על המסך
+                </div>
               </div>
             </div>
-            <input
-              type="checkbox"
-              checked={screensaverSettings.isEnabled}
-              onChange={(e) => updateScreensaverSettings({ isEnabled: e.target.checked })}
-              className="size-5 rounded border-border text-primary"
-            />
+            <button
+              onClick={() => setScreensaverActive(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 transition"
+            >
+              <Play className="size-3.5 fill-current" />
+              <span>הפעל עכשיו</span>
+            </button>
+          </div>
+
+          {/* Core Screensaver Admin Panel */}
+          <div className="pt-1">
+            <ScreensaverAdminPanel />
           </div>
 
           {/* Idle Timeout setting */}

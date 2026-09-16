@@ -57,6 +57,7 @@ export function TVHeader({
     toggleVoiceAnnounce,
     isVoiceSpeaking,
     triggerVoiceTest,
+    stopSpeakingVoice,
   } = useDispatchBoard();
   const now = useClock();
   const [isMuted, setIsMuted] = useState(isAudioMuted());
@@ -119,7 +120,13 @@ export function TVHeader({
         {/* Voice Speech Synthesis (Noa AI Hebrew Female Voice) */}
         <div className="flex items-center gap-1.5 rounded-xl border border-border/80 bg-background/60 p-1">
           <button
-            onClick={() => toggleVoiceAnnounce()}
+            onClick={() => {
+              if (isVoiceSpeaking) {
+                stopSpeakingVoice();
+              } else {
+                toggleVoiceAnnounce();
+              }
+            }}
             className={cn(
               "flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-black transition",
               isVoiceSpeaking
@@ -130,7 +137,7 @@ export function TVHeader({
             )}
             title={
               isVoiceAnnounceEnabled
-                ? "קריינות קולית עברית חיה (נועה AI) פעילה להזמנות דחופות (לחץ להשבתה)"
+                ? "קריינות קולית עברית חיה (נועה AI) פעילה להזמנות בסידור (לחץ להשתקה)"
                 : "קריינות קולית מושתקת (לחץ להפעלה)"
             }
           >
@@ -154,16 +161,19 @@ export function TVHeader({
           )}
         </div>
 
-        {/* Audio Mute/Unmute toggle */}
+        {/* Audio & Voice Mute/Unmute toggle */}
         <button
-          onClick={() => toggleAudioMute()}
+          onClick={() => {
+            stopSpeakingVoice();
+            toggleAudioMute();
+          }}
           className={cn(
             "grid size-10 place-items-center rounded-xl ring-1 ring-inset transition",
             isMuted
               ? "bg-rose-500/10 text-rose-500 ring-rose-500/30 hover:bg-rose-500/20"
               : "bg-emerald-500/10 text-emerald-600 ring-emerald-500/30 hover:bg-emerald-500/20",
           )}
-          title={isMuted ? "בטל השתקת צלילים והתראות" : "השתק צלילי מערכת"}
+          title={isMuted ? "בטל השתקת צלילים וקריינות קולית" : "השתק צלילים וקריינות קולית"}
         >
           {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
         </button>

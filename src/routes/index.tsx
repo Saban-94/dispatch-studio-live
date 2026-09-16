@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AnimatePresence } from "framer-motion";
 import { useMemo, useState, useEffect } from "react";
 import { DispatchProvider, useDispatchBoard } from "@/context/DispatchContext";
+import { AdminControlProvider } from "@/context/AdminControlContext";
 import { TVHeader } from "@/components/tv/TVHeader";
 import { UrgentDeliveriesTicker } from "@/components/tv/UrgentDeliveriesTicker";
 import { NoaAIBanner } from "@/components/tv/NoaAIBanner";
@@ -174,7 +175,9 @@ function LiveBoard() {
 function DispatchPage() {
   return (
     <DispatchProvider>
-      <LiveBoard />
+      <AdminControlProvider>
+        <LiveBoard />
+      </AdminControlProvider>
     </DispatchProvider>
   );
 }

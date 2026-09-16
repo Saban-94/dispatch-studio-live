@@ -4,7 +4,12 @@ import { useDispatchBoard } from "@/context/DispatchContext";
 import { cn } from "@/lib/utils";
 
 export function NoaFlashOverlay() {
-  const { flash, dismissFlash, isVoiceSpeaking } = useDispatchBoard();
+  const { flash, dismissFlash, isVoiceSpeaking, stopSpeakingVoice } = useDispatchBoard();
+
+  const handleDismiss = () => {
+    stopSpeakingVoice();
+    dismissFlash();
+  };
 
   return (
     <AnimatePresence>
@@ -13,7 +18,7 @@ export function NoaFlashOverlay() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={dismissFlash}
+          onClick={handleDismiss}
           className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 backdrop-blur-sm"
         >
           <motion.div
@@ -48,10 +53,18 @@ export function NoaFlashOverlay() {
               <div className="flex items-center gap-3">
                 <div className="text-xl font-black text-muted-foreground">התראת נועה AI</div>
                 {isVoiceSpeaking && (
-                  <span className="flex items-center gap-1.5 rounded-full bg-purple-500/20 px-3 py-1 text-xs font-black text-purple-300 ring-1 ring-purple-400/50 animate-pulse">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      stopSpeakingVoice();
+                    }}
+                    className="flex items-center gap-1.5 rounded-full bg-purple-500/20 px-3 py-1 text-xs font-black text-purple-300 ring-1 ring-purple-400/50 hover:bg-rose-500/20 hover:text-rose-300 hover:ring-rose-400/50 transition cursor-pointer"
+                    title="לחץ להשתקת הקול ברגע זה"
+                  >
                     <Volume2 className="size-3.5 animate-bounce text-purple-400" />
-                    <span>קריינות קולית חיה בעברית...</span>
-                  </span>
+                    <span>קריינות פעילה (לחץ להשתקה)</span>
+                  </button>
                 )}
               </div>
               <p className="mt-2 text-5xl font-black leading-tight text-foreground">

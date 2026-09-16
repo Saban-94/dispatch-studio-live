@@ -7,7 +7,7 @@
  */
 
 import type { Order, OrderStatus } from "@/types/dispatch";
-import { isAudioMuted } from "@/utils/soundEffects";
+import { isAudioMuted, subscribeSoundMute } from "@/utils/soundEffects";
 
 const VOICE_ENABLED_STORAGE_KEY = "saban_voice_alerts_enabled";
 const VOICE_VOLUME_STORAGE_KEY = "saban_voice_alerts_volume";
@@ -84,6 +84,14 @@ if (typeof window !== "undefined") {
       findBestHebrewFemaleVoice();
     };
   }
+
+  // Instantly cancel ongoing voice narration if audio is muted
+  subscribeSoundMute((muted) => {
+    if (muted) {
+      stopSpeaking();
+    }
+    notifyVoiceListeners();
+  });
 }
 
 /**
@@ -223,6 +231,23 @@ export function setVoiceVolume(vol: number): void {
 
 export function isCurrentlySpeaking(): boolean {
   return isSpeakingState;
+}
+
+/**
+ * Immediately silences and cancels all browser speech synthesis utterances.
+ * Cuts off the voice instantly upon pressing the speaker button or muting.
+ */
+export function stopSpeaking(): void {
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch (err) {
+      console.warn("[VoiceAlertService] Cancel speech error:", err);
+    }
+  }
+  activeUtterances.clear();
+  isSpeakingState = false;
+  notifyVoiceListeners();
 }
 
 /**
@@ -413,12 +438,12 @@ export function buildUrgentOrderAnnouncementScript(
   }
 
   if (newStatus === "סופק") {
-    return `הזמנה דחופה מספר ${order.orderId} עבור ${customerName} סופקה בהצלחה.`;
+    return `הזמנה בסידור מספר ${order.orderId} עבור ${customerName} סופקה בהצלחה.`;
   }
 
-  // General urgent order status change
+  // General order status change in dispatch
   const fromText = previousStatus ? `מ${previousStatus} ` : "";
-  return `שימו לב: עדכון סטטוס בהזמנה דחופה מספר ${order.orderId}, עבור ${customerName}. הסטטוס עודכן ${fromText}ל: ${newStatus}. ${driverSegment}`;
+  return `שימו לב: עדכון סטטוס בהזמנה בסידור מספר ${order.orderId}, עבור ${customerName}. הסטטוס עודכן ${fromText}ל: ${newStatus}. ${driverSegment}`;
 }
 
 /**
@@ -466,6 +491,6 @@ export async function announceUrgentOrderStatusChange(
  */
 export async function testVoiceAnnouncement(): Promise<void> {
   const sampleText =
-    "בדיקת מערכת התראות קוליות נועה איי איי. קריינות קולית בעברית פעילה ומוכנה לדיווח על הזמנות דחופות בזמן אמת.";
+    "בדיקת מערכת התראות קוליות נועה איי איי. קריינות קולית בעברית פעילה ומוכנה לדיווח על הזמנות בסידור בזמן אמת.";
   await speakHebrew(sampleText);
 }
