@@ -139,9 +139,9 @@ export function InventoryAlertSlide({
 
           <div>
             <h2 className="text-xl font-black tracking-tight text-foreground flex items-center gap-2">
-              <span>בקרת מלאי רצפה וספי ביטחון</span>
+              <span>בקרת מלאי מנימום וספי ביטחון</span>
               <span className="rounded-lg bg-cyan-500/15 dark:bg-cyan-500/20 px-2 py-0.5 text-[11px] font-bold text-cyan-700 dark:text-cyan-300 ring-1 ring-cyan-500/30">
-                זמן אמת (עמודה H)
+                זמן אמת 
               </span>
             </h2>
             <p className="text-xs text-muted-foreground">
@@ -416,7 +416,7 @@ export function InventoryAlertSlide({
                   <div className="my-2.5 flex items-baseline justify-between">
                     <div>
                       <div className="text-[11px] font-bold text-muted-foreground">
-                        יתרת רצפה אפקטיבית:
+                        יתרת מנימום אפקטיבית:
                       </div>
                       <div className="text-2xl lg:text-3xl font-black text-foreground tabular-nums tracking-tight flex items-baseline gap-1.5">
                         <span
