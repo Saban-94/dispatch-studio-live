@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useDispatch } from "@/context/DispatchContext";
+import { useDispatchBoard } from "@/context/DispatchContext";
 import { HarashWarehouseApp } from "@/components/mobile/HarashWarehouseApp";
 
 export const Route = createFileRoute("/harash4")({
@@ -7,14 +7,14 @@ export const Route = createFileRoute("/harash4")({
 });
 
 function Harash4RouteComponent() {
-  const { orders, updateOrderStatus, refreshOrders, isRefreshing } = useDispatch();
+  const { published, quickUpdateStatus, syncNow, syncStatus } = useDispatchBoard();
 
   return (
     <HarashWarehouseApp
-      orders={orders}
-      onUpdateOrderStatus={updateOrderStatus}
-      onRefresh={refreshOrders}
-      isRefreshing={isRefreshing}
+      orders={published}
+      onUpdateOrderStatus={quickUpdateStatus}
+      onRefresh={syncNow}
+      isRefreshing={syncStatus === "syncing"}
     />
   );
 }
