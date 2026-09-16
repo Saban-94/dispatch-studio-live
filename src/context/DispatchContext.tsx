@@ -7,221 +7,201 @@ import React, {
   useRef,
   ReactNode,
 } from "react";
-import type { Order } from "@/types/dispatch";
-import { sheetsService } from "@/services/sheetsService";
-import { voiceAlertService } from "@/services/voiceAlertService";
-import { playSound } from "@/utils/soundEffects";
-import { calculateInventoryBalances } from "@/services/inventoryService";
+import type { Order, OrderStatus } from "@/types/dispatch";
+import {
+  playNewOrderSound,
+  playSuccessSound,
+  playAlarmSound,
+} from "@/utils/soundEffects";
 
-export interface DispatchContextType {
+export interface DispatchBoardContextType {
+  published: Order[];
   orders: Order[];
   isLoading: boolean;
   isRefreshing: boolean;
+  syncStatus: "idle" | "syncing" | "error";
   lastUpdated: Date | null;
   activeBranch: string;
   setActiveBranch: (branch: string) => void;
+  startPicking: (orderId: string, picker?: string) => Promise<void>;
+  finishPicking: (orderId: string) => Promise<void>;
+  reportPickerOverrun: (orderId: string) => void;
+  quickUpdateStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   updateOrderStatus: (orderId: string, newStatus: string) => Promise<void>;
-  refreshOrders: () => Promise<void>;
+  syncNow: () => Promise<void>;
+  toggleItemApproval: (orderId: string, sku: string) => void;
+  approveAllItems: (orderId: string) => void;
+  pushAlert: (text: string, type?: "info" | "success" | "warning" | "error") => void;
   broadcastCustomMessage: (text: string) => void;
   announceMorningShift: (speakerName?: string) => void;
-  announceDriverDeparture: (driverName: string, destination: string) => void;
-  announcePickingComplete: (pickerName: string, orderId: string) => void;
 }
 
-const DispatchContext = createContext<DispatchContextType | undefined>(undefined);
+const DispatchContext = createContext<DispatchBoardContextType | undefined>(undefined);
 
 export function DispatchProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "error">("idle");
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [activeBranch, setActiveBranch] = useState<string>("all");
 
   const prevOrdersRef = useRef<Map<string, Order>>(new Map());
   const initialLoadDoneRef = useRef(false);
-  const alertedCriticalSkusRef = useRef<Set<string>>(new Set());
 
-  // פונקציית רענון וסנכרון נתונים
-  const fetchOrdersData = useCallback(async (showRefreshingSpinner = false) => {
-    if (showRefreshingSpinner) setIsRefreshing(true);
+  // סנכרון הזמנות מול API / גיליון
+  const fetchOrdersData = useCallback(async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
+    setSyncStatus("syncing");
+
     try {
-      const fetchedOrders = await sheetsService.fetchOrders();
-      setOrders(fetchedOrders || []);
-      setLastUpdated(new Date());
+      const res = await fetch("/api/sheets/orders", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const fetchedOrders: Order[] = Array.isArray(data) ? data : data.orders || [];
+        setOrders(fetchedOrders);
+        setLastUpdated(new Date());
 
-      // בדיקת שינויי סטטוס ומלאי רק לאחר הטעינה הראשונית
-      if (initialLoadDoneRef.current && fetchedOrders) {
-        checkOrderChangesAndAnnounce(fetchedOrders);
-        checkInventoryDeficitsAndAnnounce(fetchedOrders);
-      } else {
-        // בטעינה ראשונה בונים את המפה בלי להכריז
+        // ניטור שינויי סטטוס והשמעת צלילים
+        if (initialLoadDoneRef.current) {
+          const prevMap = prevOrdersRef.current;
+          fetchedOrders.forEach((order) => {
+            const prev = prevMap.get(order.orderId || order.id);
+            if (!prev) {
+              playNewOrderSound();
+            } else if (prev.status !== order.status) {
+              if (order.status === "מוכן להעמסה" || order.status === "יצא לדרך" || order.status === "סופק") {
+                playSuccessSound();
+              }
+            }
+          });
+        }
+
         const map = new Map<string, Order>();
-        (fetchedOrders || []).forEach((o) => map.set(o.id, o));
+        fetchedOrders.forEach((o) => map.set(o.orderId || o.id, o));
         prevOrdersRef.current = map;
         initialLoadDoneRef.current = true;
+        setSyncStatus("idle");
+      } else {
+        setSyncStatus("idle");
       }
     } catch (err) {
-      console.error("שגיאה בסנכרון נתוני הזמנות:", err);
+      console.warn("סנכרון הזמנות ברקע:", err);
+      setSyncStatus("error");
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
   }, []);
 
-  // ניטור שינויי סטטוס והזמנות חדשות - שפת ח. סבן
-  const checkOrderChangesAndAnnounce = (currentOrders: Order[]) => {
-    const prevMap = prevOrdersRef.current;
-    const newMap = new Map<string, Order>();
-
-    currentOrders.forEach((order) => {
-      newMap.set(order.id, order);
-      const prev = prevMap.get(order.id);
-
-      if (!prev) {
-        // הזמנה חדשה נוספה למערכת
-        playSound("new_order");
-        if (order.deliveryType === "מנוף") {
-          voiceAlertService.announce(
-            `תמיר, יש הזמנת מנוף חדשה עבור ${order.client || "לקוח"}.`
-          );
-        } else {
-          voiceAlertService.announce(
-            `תמיר, יש הזמנה חדשה לליקוט עבור ${order.client || "לקוח"}.`
-          );
-        }
-      } else if (prev.status !== order.status) {
-        // זיהוי שינוי סטטוס
-        const status = (order.status || "").trim();
-
-        if (status === "מוכן להעמסה") {
-          playSound("success");
-          voiceAlertService.announce(
-            `אורן סיים ליקוט להזמנה ${order.id}, משטח מוכן להעמסה.`
-          );
-        } else if (status === "בהעמסה") {
-          const driver = order.driver || "הנהג";
-          voiceAlertService.announce(
-            `שימו לב במגרש, משאית של ${driver} נכנסת לרמפה להעמסה.`
-          );
-        } else if (status === "יצא לדרך" || status === "סופק") {
-          playSound("success");
-          const driver = order.driver || "הנהג";
-          const dest = order.destination || "האתר";
-          voiceAlertService.announce(
-            `משאית של ${driver} הועמסה ויצאה לדרך ל${dest}.`
-          );
-        }
-      }
-    });
-
-    prevOrdersRef.current = newMap;
+  // התחלת ליקוט עם חותמת זמן
+  const startPicking = async (orderId: string, picker = "אורן") => {
+    const now = Date.now();
+    if (typeof window !== "undefined") {
+      localStorage.setItem(`saban_picker_start_${orderId}`, String(now));
+    }
+    await quickUpdateStatus(orderId, "בהכנה" as OrderStatus);
+    playNewOrderSound();
   };
 
-  // ניטור מלאי רצפה והכרזות קצרות וקלילות
-  const checkInventoryDeficitsAndAnnounce = (currentOrders: Order[]) => {
+  // סיום ליקוט
+  const finishPicking = async (orderId: string) => {
+    await quickUpdateStatus(orderId, "מוכן להעמסה" as OrderStatus);
+    playSuccessSound();
+  };
+
+  // דיווח חריגת SLA (מעל 20 דק')
+  const reportPickerOverrun = (orderId: string) => {
+    playAlarmSound();
+  };
+
+  // עדכון סטטוס מהיר
+  const quickUpdateStatus = async (orderId: string, status: OrderStatus) => {
+    setOrders((prev) =>
+      prev.map((o) => ((o.orderId || o.id) === orderId ? { ...o, status } : o))
+    );
+
     try {
-      const inventory = calculateInventoryBalances(currentOrders, activeBranch);
-      if (!inventory || !inventory.items) return;
-
-      inventory.items.forEach((item: any) => {
-        const skuKey = item.sku || item.cleanName;
-
-        if (item.isCritical && !alertedCriticalSkusRef.current.has(skuKey)) {
-          alertedCriticalSkusRef.current.add(skuKey);
-          playSound("annoying_buzzer");
-
-          if (item.cleanName.includes("מלט")) {
-            voiceAlertService.announce("חברים, מלט אפור מתקרב לסוף ברצפה, לשים לב.");
-          } else if (item.cleanName.includes("חול") || item.cleanName.includes("בלה")) {
-            voiceAlertService.announce("ראמי, נשארו פחות מעשר בלות חול במגרש, צריך לתאם פול.");
-          } else if (item.cleanName.includes("דבק")) {
-            voiceAlertService.announce("שימו לב במחסן: דבק קרמיקה ירד מתחת לסף הביטחון.");
-          } else if (item.cleanName.includes("טיט")) {
-            voiceAlertService.announce("אורן, נגמר המקום במשטחי טיט, נא לרכז ספקים.");
-          } else {
-            voiceAlertService.announce(`שימו לב במגרש: מלאי ${item.cleanName} נמוך.`);
-          }
-        } else if (!item.isCritical && alertedCriticalSkusRef.current.has(skuKey)) {
-          // איפוס התראה כשהמלאי עלה חזרה
-          alertedCriticalSkusRef.current.delete(skuKey);
-        }
+      await fetch("/api/sheets/update-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, status }),
       });
     } catch (e) {
-      console.error("שגיאה בחישוב התראות מלאי קוליות:", e);
+      console.error("שגיאה בעדכון סטטוס:", e);
     }
   };
 
-  // עדכון סטטוס הזמנה
-  const updateOrderStatus = async (orderId: string, newStatus: string) => {
-    // עדכון אופטימי מיידי לכל המסכים
+  // אישור פריט בודד בליקוט
+  const toggleItemApproval = (orderId: string, sku: string) => {
     setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+      prev.map((order) => {
+        if ((order.orderId || order.id) !== orderId) return order;
+        const items = (order.items || []).map((item) =>
+          item.sku === sku ? { ...item, isApproved: !item.isApproved } : item
+        );
+        return { ...order, items };
+      })
     );
+  };
 
-    try {
-      await sheetsService.updateOrderStatus(orderId, newStatus);
-      // סנכרון חוזר מוודא
-      fetchOrdersData(false);
-    } catch (err) {
-      console.error("שגיאה בעדכון סטטוס להזמנה:", err);
-      // החזרה למצב קודם אם נכשל
-      fetchOrdersData(false);
+  // אישור כל הפריטים בהזמנה
+  const approveAllItems = (orderId: string) => {
+    setOrders((prev) =>
+      prev.map((order) => {
+        if ((order.orderId || order.id) !== orderId) return order;
+        const items = (order.items || []).map((item) => ({ ...item, isApproved: true }));
+        return { ...order, items };
+      })
+    );
+    playSuccessSound();
+  };
+
+  const pushAlert = (text: string) => {
+    console.log("Alert:", text);
+  };
+
+  const broadcastCustomMessage = (text: string) => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "he-IL";
+      window.speechSynthesis.speak(u);
     }
   };
 
-  // הכרזת בוקר טוב ופתיחת משמרת
-  const announceMorningShift = useCallback((speakerName = "ראמי") => {
-    playSound("new_order");
-    voiceAlertService.announce(
-      `בוקר טוב לכולם, ${speakerName} התחיל משמרת בסדרן. יום מוצלח לכל הצוות.`
-    );
-  }, []);
+  const announceMorningShift = (speakerName = "ראמי") => {
+    playNewOrderSound();
+    broadcastCustomMessage(`בוקר טוב לכולם, ${speakerName} התחיל משמרת בסדרן. יום מוצלח לכל הצוות.`);
+  };
 
-  // הכרזת שחרור נהג לדרך
-  const announceDriverDeparture = useCallback((driverName: string, destination: string) => {
-    playSound("success");
-    voiceAlertService.announce(
-      `משאית של ${driverName} הועמסה ויצאה לדרך ל${destination}. סע בזהירות!`
-    );
-  }, []);
-
-  // הכרזת סיום ליקוט
-  const announcePickingComplete = useCallback((pickerName: string, orderId: string) => {
-    playSound("success");
-    voiceAlertService.announce(
-      `${pickerName} סיים ליקוט להזמנה ${orderId}, משטח מוכן להעמסה.`
-    );
-  }, []);
-
-  // שידור הודעה חופשית
-  const broadcastCustomMessage = useCallback((text: string) => {
-    if (!text.trim()) return;
-    voiceAlertService.announce(text.trim());
-  }, []);
-
-  // Polling רציף כל 12 שניות
   useEffect(() => {
     fetchOrdersData(false);
     const interval = setInterval(() => {
       fetchOrdersData(false);
     }, 12000);
-
     return () => clearInterval(interval);
   }, [fetchOrdersData]);
 
-  const value = {
+  const value: DispatchBoardContextType = {
+    published: orders,
     orders,
     isLoading,
     isRefreshing,
+    syncStatus,
     lastUpdated,
     activeBranch,
     setActiveBranch,
-    updateOrderStatus,
-    refreshOrders: () => fetchOrdersData(true),
+    startPicking,
+    finishPicking,
+    reportPickerOverrun,
+    quickUpdateStatus,
+    updateOrderStatus: quickUpdateStatus,
+    syncNow: () => fetchOrdersData(true),
+    toggleItemApproval,
+    approveAllItems,
+    pushAlert,
     broadcastCustomMessage,
     announceMorningShift,
-    announceDriverDeparture,
-    announcePickingComplete,
   };
 
   return (
@@ -231,10 +211,14 @@ export function DispatchProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useDispatch() {
+// ייצוא השם המדויק ש-src/routes/index.tsx דורש
+export function useDispatchBoard() {
   const context = useContext(DispatchContext);
   if (!context) {
-    throw new Error("useDispatch must be used within a DispatchProvider");
+    throw new Error("useDispatchBoard must be used within a DispatchProvider");
   }
   return context;
 }
+
+// תמיכה לאחור בייצוא useDispatch
+export const useDispatch = useDispatchBoard;
