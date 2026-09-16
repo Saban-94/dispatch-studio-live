@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
-import { motion, AnimatePresence, useAnimation, PanInfo } from "framer-motion";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   PackageCheck,
   Truck,
@@ -7,23 +7,28 @@ import {
   Clock,
   Warehouse,
   Search,
-  AlertTriangle,
   RotateCcw,
-  Sparkles,
-  Layers,
-  ChevronLeft,
-  ChevronRight,
   Boxes,
   Sun,
   Moon,
-  Volume2,
   Bell,
   MapPin,
   User,
+  ChevronDown,
+  Monitor,
+  MonitorOff,
+  Menu,
+  X,
+  Phone,
+  CheckSquare,
+  Square,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import type { Order } from "@/types/dispatch";
 import { useTheme } from "@/hooks/useTheme";
 import { InventoryDemandCard } from "./InventoryDemandCard";
+import { ProductSlide } from "@/components/screensaver/ProductSlide";
 import { cn } from "@/lib/utils";
 
 interface PickerViewProps {
@@ -35,6 +40,12 @@ interface PickerViewProps {
 
 type TabType = "picking" | "ready" | "inventory";
 
+interface ParsedItem {
+  sku?: string;
+  name: string;
+  quantity: string;
+}
+
 export function PickerView({
   orders,
   onUpdateStatus,
@@ -45,8 +56,36 @@ export function PickerView({
   const [activeTab, setActiveTab] = useState<TabType>("picking");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBranch, setSelectedBranch] = useState<string>("all");
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
-  // סיווג הזמנות פעילות לפי שלבי רצפת מגרש
+  // מנגנון שומר מסך במובייל (כיבוי ידני או חוסר פעילות)
+  const [screensaverActive, setScreensaverActive] = useState(false);
+  const [screensaverEnabled, setScreensaverEnabled] = useState(true);
+  const [screensaverMenuOpen, setScreensaverMenuOpen] = useState(false);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (!screensaverEnabled || screensaverActive) return;
+
+    // מעבר לשומר מסך לאחר 60 שניות ללא מגע
+    idleTimerRef.current = setTimeout(() => {
+      setScreensaverActive(true);
+    }, 60000);
+  }, [screensaverEnabled, screensaverActive]);
+
+  useEffect(() => {
+    const events = ["touchstart", "touchmove", "scroll", "keydown", "click"];
+    events.forEach((ev) => window.addEventListener(ev, resetIdleTimer, { passive: true }));
+    resetIdleTimer();
+
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      events.forEach((ev) => window.removeEventListener(ev, resetIdleTimer));
+    };
+  }, [resetIdleTimer]);
+
+  // סיווג הזמנות פעילות
   const pickingOrders = useMemo(() => {
     return orders.filter((o) =>
       ["בסידור עבודה", "בהכנה", "בהמתנה"].some(
@@ -63,7 +102,7 @@ export function PickerView({
     );
   }, [orders]);
 
-  // סינון מהיר לפי מחסן ושורת חיפוש
+  // סינון רשימה
   const filteredOrders = useMemo(() => {
     const list = activeTab === "picking" ? pickingOrders : readyOrders;
     return list.filter((order) => {
@@ -85,118 +124,234 @@ export function PickerView({
     });
   }, [activeTab, pickingOrders, readyOrders, selectedBranch, searchQuery]);
 
-  // הודעות נעות דינמיות לשורת הטיקר במובייל
-  const tickerMessages = useMemo(() => {
-    const msgs: string[] = [];
-    const craneCount = orders.filter((o) => o.deliveryType === "מנוף").length;
-    if (craneCount > 0) msgs.push(`⚠️ ${craneCount} פריקות מנוף מתוזמנות להיום`);
-
-    const inPrep = pickingOrders.length;
-    msgs.push(`📦 ${inPrep} הזמנות ממתינות להשלמת ליקוט במגרש`);
-
-    msgs.push("🔔 שימו לב: הקפידו על אימות שקי בלה ומשטחי סבן לפני שחרור נהג");
-    return msgs;
-  }, [orders, pickingOrders.length]);
-
-  const handleStatusAdvance = async (order: Order, targetStatus?: string) => {
-    if (!onUpdateStatus) return;
-
-    if (targetStatus) {
-      await onUpdateStatus(order.id, targetStatus);
-      return;
-    }
-
-    if (activeTab === "picking") {
-      await onUpdateStatus(order.id, "מוכן להעמסה");
-    } else if (activeTab === "ready") {
-      await onUpdateStatus(order.id, "יצא לדרך");
-    }
+  const toggleExpandOrder = (id: string) => {
+    setExpandedOrderId((prev) => (prev === id ? null : id));
   };
 
+  const handleStatusAdvance = async (order: Order, targetStatus: string) => {
+    if (!onUpdateStatus) return;
+    await onUpdateStatus(order.id, targetStatus);
+  };
+
+  // תצוגת שומר מסך מובייל (עם תפריט צד מנוקה מהגדרות ניהול)
+  if (screensaverActive) {
+    return (
+      <div dir="rtl" className="relative h-screen w-full bg-background overflow-hidden select-none">
+        {/* Top Floating Control Bar */}
+        <div className="absolute top-4 inset-x-4 z-50 flex items-center justify-between">
+          <button
+            onClick={() => setScreensaverMenuOpen(true)}
+            className="grid size-12 place-items-center rounded-2xl bg-card/90 border border-border/80 text-foreground shadow-xl backdrop-blur-md active:scale-95"
+            title="תפריט מידע"
+          >
+            <Menu className="size-6 text-primary" />
+          </button>
+
+          <button
+            onClick={() => setScreensaverActive(false)}
+            className="flex items-center gap-2 h-12 px-4 rounded-2xl bg-primary text-primary-foreground font-black text-xs shadow-xl active:scale-95 transition"
+          >
+            <ArrowRight className="size-4" />
+            <span>חזרה למסוף מלקט</span>
+          </button>
+        </div>
+
+        {/* שומר מסך שקופיות מוצר */}
+        <div className="h-full w-full pt-16 pb-4 px-2">
+          <ProductSlide
+            orders={orders}
+            branchFilter={selectedBranch === "all" ? "all" : (selectedBranch as any)}
+            intervalSeconds={12}
+            prioritizeCritical={true}
+          />
+        </div>
+
+        {/* תפריט צד מובייל בשומר המסך (נקי מהגדרות אדמין, מותאם למשתמש שטח) */}
+        <AnimatePresence>
+          {screensaverMenuOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setScreensaverMenuOpen(false)}
+                className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+              />
+
+              <motion.div
+                initial={{ x: "100%" }}
+                animate={{ x: 0 }}
+                exit={{ x: "100%" }}
+                transition={{ type: "spring", stiffness: 400, damping: 35 }}
+                className="fixed inset-y-0 right-0 z-50 w-72 bg-card border-l border-border/80 p-5 shadow-2xl flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between pb-4 border-b border-border/70">
+                    <div className="flex items-center gap-2.5">
+                      <div className="grid size-9 place-items-center rounded-xl bg-primary/15 text-primary">
+                        <Warehouse className="size-5" />
+                      </div>
+                      <div>
+                        <h2 className="text-sm font-black text-foreground">שומר מסך מגרש</h2>
+                        <p className="text-[10px] text-muted-foreground">תצוגת מידע ללא הגדרות</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setScreensaverMenuOpen(false)}
+                      className="grid size-8 place-items-center rounded-lg bg-secondary text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-4" />
+                    </button>
+                  </div>
+
+                  {/* Operational Summaries */}
+                  <div className="flex flex-col gap-3 mt-5">
+                    <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
+                      <span className="text-xs text-muted-foreground block font-medium">הזמנות לליקוט</span>
+                      <span className="text-2xl font-black text-foreground tabular-nums">
+                        {pickingOrders.length}
+                      </span>
+                    </div>
+
+                    <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
+                      <span className="text-xs text-muted-foreground block font-medium">מוכנות / בהעמסה</span>
+                      <span className="text-2xl font-black text-emerald-500 tabular-nums">
+                        {readyOrders.length}
+                      </span>
+                    </div>
+
+                    <div className="rounded-xl border border-border/70 bg-secondary/40 p-3">
+                      <span className="text-xs text-muted-foreground block font-medium">סניף מוצג</span>
+                      <span className="text-sm font-black text-foreground mt-0.5 block">
+                        {selectedBranch === "all" ? "כל המגרשים" : selectedBranch}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-4 border-t border-border/70">
+                  <button
+                    onClick={() => {
+                      setScreensaverEnabled(false);
+                      setScreensaverActive(false);
+                      setScreensaverMenuOpen(false);
+                    }}
+                    className="flex items-center justify-center gap-2 h-11 w-full rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-400 font-bold text-xs"
+                  >
+                    <MonitorOff className="size-4" />
+                    <span>בטל שומר מסך אוטומטי</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setScreensaverActive(false);
+                      setScreensaverMenuOpen(false);
+                    }}
+                    className="flex items-center justify-center gap-2 h-11 w-full rounded-xl bg-primary text-primary-foreground font-black text-xs shadow-md"
+                  >
+                    <span>סגור תפריט</span>
+                  </button>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
   return (
-    <div
-      dir="rtl"
-      className="flex flex-col h-screen w-full select-none overflow-hidden bg-background text-foreground"
-    >
+    <div dir="rtl" className="flex flex-col h-screen w-full select-none overflow-hidden bg-background text-foreground">
       {/* Top App Bar - Fixed Mobile Header */}
       <header className="sticky top-0 z-30 flex flex-col border-b border-border/80 bg-card/95 px-3.5 pt-3 pb-2.5 backdrop-blur-xl shadow-md">
-        <div className="flex items-center justify-between gap-2.5">
+        <div className="flex items-center justify-between gap-2">
           {/* Brand Info */}
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="grid size-11 place-items-center rounded-2xl bg-primary/15 text-primary border border-primary/30 shadow-inner shrink-0">
               <PackageCheck className="size-6" />
             </div>
             <div className="truncate">
-              <h1 className="text-base font-black tracking-tight leading-tight truncate">
-                מסוף מלקט מגרש
-              </h1>
+              <h1 className="text-base font-black tracking-tight leading-tight truncate">מסוף מלקט</h1>
               <p className="text-xs font-bold text-muted-foreground flex items-center gap-1 mt-0.5">
                 <span className="size-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                <span>ח. סבן · סנכרון חי</span>
+                <span>ח. סבן · מגרש חי</span>
               </p>
             </div>
           </div>
 
-          {/* Action Controls: Branch, Theme Toggle, Refresh */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Action Controls: Prominent Theme Toggle, Branch Selector, Screensaver & Refresh */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* כפתור עיצוב בהיר / כהה מוגדל ובולט */}
+            <button
+              onClick={toggleTheme}
+              className={cn(
+                "h-11 px-3 flex items-center gap-1.5 rounded-2xl border font-black text-xs transition active:scale-95 shadow-md",
+                isDark
+                  ? "border-amber-400/50 bg-amber-400/15 text-amber-300"
+                  : "border-slate-300 bg-slate-100 text-slate-800 shadow-sm"
+              )}
+              title="החלף מצב יום/לילה"
+            >
+              {isDark ? <Sun className="size-4 text-amber-400" /> : <Moon className="size-4 text-slate-700" />}
+              <span>{isDark ? "יום" : "לילה"}</span>
+            </button>
+
+            {/* בורר מחסן */}
             <select
               value={selectedBranch}
               onChange={(e) => setSelectedBranch(e.target.value)}
-              className="h-10 rounded-xl border border-border bg-background px-3 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm"
+              className="h-11 rounded-2xl border border-border bg-background px-2.5 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm"
             >
-              <option value="all">כל המגרשים</option>
-              <option value="החרש">סניף 4 החרש</option>
-              <option value="התלמיד">סניף 1 התלמיד</option>
+              <option value="all">הכל</option>
+              <option value="החרש">החרש</option>
+              <option value="התלמיד">התלמיד</option>
             </select>
 
+            {/* כפתור שומר מסך ידני */}
             <button
-              onClick={toggleTheme}
-              className="grid size-10 place-items-center rounded-xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary"
-              title="החלף ערכת נושא"
-              aria-label="החלף ערכת נושא"
+              onClick={() => setScreensaverActive(true)}
+              className="grid size-11 place-items-center rounded-2xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary"
+              title="הפעל שומר מסך ידנית"
             >
-              {isDark ? (
-                <Sun className="size-4 text-amber-400" />
-              ) : (
-                <Moon className="size-4 text-slate-700" />
-              )}
+              <Monitor className="size-4 text-primary" />
             </button>
 
+            {/* רענון */}
             <button
               onClick={onRefresh}
               disabled={isRefreshing}
               className={cn(
-                "grid size-10 place-items-center rounded-xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary",
+                "grid size-11 place-items-center rounded-2xl border border-border bg-card text-foreground transition active:scale-95 shadow-sm hover:bg-secondary",
                 isRefreshing && "text-primary"
               )}
-              title="רענן נתונים"
+              title="רענן הזמנות"
             >
               <RotateCcw className={cn("size-4", isRefreshing && "animate-spin")} />
             </button>
           </div>
         </div>
 
-        {/* Dynamic Mobile Running Marquee Ticker */}
+        {/* שורת הודעות זזות (Marquee Ticker) */}
         <div className="mt-2.5 flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-3 py-1.5 shadow-inner">
           <div className="flex items-center gap-1 text-[11px] font-black text-primary shrink-0 border-l border-primary/20 pl-2">
             <Bell className="size-3.5 animate-bounce text-primary" />
-            <span>עדכון</span>
+            <span>התראה</span>
           </div>
 
           <div className="relative flex-1 overflow-hidden h-4">
             <motion.div
               className="absolute whitespace-nowrap text-[11px] font-bold text-foreground flex gap-8"
-              animate={{ x: [300, -600] }}
-              transition={{ repeat: Infinity, duration: 18, ease: "linear" }}
+              animate={{ x: [300, -650] }}
+              transition={{ repeat: Infinity, duration: 20, ease: "linear" }}
             >
-              {tickerMessages.map((msg, i) => (
-                <span key={i}>{msg}</span>
-              ))}
+              <span>⚠️ שים לב: פריקות מנוף מקבלות עדיפות ליקוט במשטחי ההעמסה</span>
+              <span>📦 וודא החתמת תעודת משלוח מול הנהג לפני יציאה מהשער</span>
+              <span>🔔 דרישות רכש מעודכנות בזמן אמת בטאב 'מלאי מגרש'</span>
             </motion.div>
           </div>
         </div>
 
-        {/* Search bar inside header (Only for Picking & Ready tabs) */}
+        {/* שורת חיפוש */}
         {activeTab !== "inventory" && (
           <div className="relative mt-2.5">
             <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -204,14 +359,14 @@ export function PickerView({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="חיפוש מהיר לפי לקוח, יעד, חומר או מספר הזמנה..."
+              placeholder="חיפוש לפי לקוח, יעד, חומר או מספר הזמנה..."
               className="w-full h-11 rounded-xl border border-border/80 bg-background/90 py-2 pr-10 pl-4 text-xs font-medium placeholder:text-muted-foreground/70 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 transition shadow-inner"
             />
           </div>
         )}
       </header>
 
-      {/* Main Scrollable View Area with Smooth Touch Momentum */}
+      {/* Main Scrollable View Area */}
       <main className="flex-1 overflow-y-auto px-3.5 py-3 pb-24 overscroll-contain">
         <AnimatePresence mode="wait">
           {activeTab === "inventory" ? (
@@ -228,9 +383,7 @@ export function PickerView({
                   <Boxes className="size-4 text-primary" />
                   <span className="text-xs font-black">דרישות רצפה וספי ביטחון</span>
                 </div>
-                <span className="text-[11px] font-bold text-muted-foreground">
-                  ניטור שטח חי
-                </span>
+                <span className="text-[11px] font-bold text-muted-foreground">ניטור שטח חי</span>
               </div>
               <InventoryDemandCard orders={orders} />
             </motion.div>
@@ -247,24 +400,17 @@ export function PickerView({
                 <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
                   <Warehouse className="size-14 stroke-1 opacity-40 mb-2" />
                   <p className="text-base font-bold text-foreground">אין משימות זמינות בשלב זה</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    הזמנות חדשות יופיעו כאן בזמן אמת מתוך הגיליון
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">הזמנות חדשות יופיעו כאן בזמן אמת</p>
                 </div>
               ) : (
                 filteredOrders.map((order) => (
-                  <SwipeableOrderCard
+                  <CollapsibleOrderCard
                     key={order.id}
                     order={order}
                     activeTab={activeTab}
-                    onSwipe={(dir) => {
-                      if (activeTab === "picking") {
-                        handleStatusAdvance(order, "מוכן להעמסה");
-                      } else {
-                        handleStatusAdvance(order, dir === "left" ? "בהעמסה" : "יצא לדרך");
-                      }
-                    }}
-                    onDirectAction={(status) => handleStatusAdvance(order, status)}
+                    isExpanded={expandedOrderId === order.id}
+                    onToggleExpand={() => toggleExpandOrder(order.id)}
+                    onAdvanceStatus={(status) => handleStatusAdvance(order, status)}
                   />
                 ))
               )}
@@ -273,10 +419,10 @@ export function PickerView({
         </AnimatePresence>
       </main>
 
-      {/* Modern Floating Bottom Navigation Bar */}
+      {/* Floating Bottom Navigation Bar */}
       <nav className="fixed bottom-0 inset-x-0 z-40 border-t border-border/80 bg-card/95 backdrop-blur-2xl px-3.5 py-2 shadow-2xl">
         <div className="grid grid-cols-3 gap-2.5 max-w-md mx-auto">
-          {/* Tab 1: Picking Queue */}
+          {/* לליקוט */}
           <button
             onClick={() => setActiveTab("picking")}
             className={cn(
@@ -292,9 +438,7 @@ export function PickerView({
                 <span
                   className={cn(
                     "absolute -top-1.5 -left-2.5 flex min-w-4 h-4 px-1 items-center justify-center rounded-full text-[10px] font-black",
-                    activeTab === "picking"
-                      ? "bg-card text-foreground"
-                      : "bg-primary text-primary-foreground"
+                    activeTab === "picking" ? "bg-card text-foreground" : "bg-primary text-primary-foreground"
                   )}
                 >
                   {pickingOrders.length}
@@ -304,7 +448,7 @@ export function PickerView({
             <span className="text-xs font-black mt-1">לליקוט ({pickingOrders.length})</span>
           </button>
 
-          {/* Tab 2: Ready / Loaded */}
+          {/* בהעמסה */}
           <button
             onClick={() => setActiveTab("ready")}
             className={cn(
@@ -320,9 +464,7 @@ export function PickerView({
                 <span
                   className={cn(
                     "absolute -top-1.5 -left-2.5 flex min-w-4 h-4 px-1 items-center justify-center rounded-full text-[10px] font-black",
-                    activeTab === "ready"
-                      ? "bg-card text-foreground"
-                      : "bg-emerald-500 text-white"
+                    activeTab === "ready" ? "bg-card text-foreground" : "bg-emerald-500 text-white"
                   )}
                 >
                   {readyOrders.length}
@@ -332,7 +474,7 @@ export function PickerView({
             <span className="text-xs font-black mt-1">בהעמסה ({readyOrders.length})</span>
           </button>
 
-          {/* Tab 3: Live Floor Inventory Demands */}
+          {/* מלאי מגרש */}
           <button
             onClick={() => setActiveTab("inventory")}
             className={cn(
@@ -351,96 +493,102 @@ export function PickerView({
   );
 }
 
-// קומפוננטת כרטיסייה נפרדת הנתמכת ב-Swipe Gesture מלא וכפתורי שטח מובלטים
-interface SwipeableOrderCardProps {
+// קומפוננטת כרטיסייה נפתחת בלחיצה ומחלצת מק"טים בנפרד
+interface CollapsibleOrderCardProps {
   order: Order;
   activeTab: TabType;
-  onSwipe: (direction: "left" | "right") => void;
-  onDirectAction: (status: string) => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onAdvanceStatus: (status: string) => void;
 }
 
-function SwipeableOrderCard({
+function CollapsibleOrderCard({
   order,
   activeTab,
-  onSwipe,
-  onDirectAction,
-}: SwipeableOrderCardProps) {
-  const controls = useAnimation();
-  const [isDone, setIsDone] = useState(false);
+  isExpanded,
+  onToggleExpand,
+  onAdvanceStatus,
+}: CollapsibleOrderCardProps) {
+  // פירוק טקסט המוצרים מעמודה H לשורות מובנות
+  const parsedItems: ParsedItem[] = useMemo(() => {
+    if (!order.productsSummary) return [];
 
-  const handleDragEnd = async (_: any, info: PanInfo) => {
-    const threshold = 110;
-    if (info.offset.x < -threshold) {
-      setIsDone(true);
-      await controls.start({ x: -400, opacity: 0, transition: { duration: 0.25 } });
-      onSwipe("left");
-    } else if (info.offset.x > threshold) {
-      setIsDone(true);
-      await controls.start({ x: 400, opacity: 0, transition: { duration: 0.25 } });
-      onSwipe("right");
-    } else {
-      controls.start({
-        x: 0,
-        opacity: 1,
-        transition: { type: "spring", stiffness: 450, damping: 28 },
+    return order.productsSummary
+      .split(/[\n,;]+/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .map((line) => {
+        // זיהוי מק"ט במידה וקיים בתבנית: מק"ט: 12345
+        const skuMatch = line.match(/(?:מק["'״]?ט|קוד)[:\s]*([0-9]{4,6})/i);
+        const sku = skuMatch ? skuMatch[1] : undefined;
+
+        // זיהוי כמות
+        const qtyMatch = line.match(/(?:כמות[:\s]*)?([0-9]+(?:\.[0-9]+)?)\s*(?:שק|משטח|יח|בלה|ק"ג)?/);
+        const quantity = qtyMatch ? qtyMatch[0] : "1";
+
+        // ניקוי שם המוצר
+        let clean = line
+          .replace(/(?:מק["'״]?ט|קוד)[:\s]*([0-9]{4,6})/gi, "")
+          .replace(/📦/g, "")
+          .replace(/\|/g, "")
+          .trim();
+
+        return {
+          sku,
+          name: clean || line,
+          quantity,
+        };
       });
-    }
+  }, [order.productsSummary]);
+
+  const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
+
+  const toggleItemCheck = (idx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCheckedItems((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
-  if (isDone) return null;
-
   return (
-    <div className="relative overflow-hidden rounded-2xl shadow-sm border border-border/80 bg-card">
-      {/* Background Swipe Actions Indicators */}
-      <div className="absolute inset-0 flex items-center justify-between px-6 text-white font-black text-xs z-0 pointer-events-none">
-        <div className="flex items-center gap-1.5 text-emerald-500">
-          <CheckCircle2 className="size-5" />
-          <span>{activeTab === "picking" ? "מוכן להעמסה" : "יצא לדרך"}</span>
-        </div>
-        <div className="flex items-center gap-1.5 text-primary">
-          <span>{activeTab === "picking" ? "סיים ליקוט" : "הועמס"}</span>
-          <ChevronLeft className="size-5" />
-        </div>
-      </div>
-
-      {/* Front Touch Card */}
-      <motion.div
-        drag="x"
-        dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={0.4}
-        onDragEnd={handleDragEnd}
-        animate={controls}
-        className="relative z-10 flex flex-col gap-3 rounded-2xl bg-card p-4 transition-colors active:bg-accent/5 cursor-grab active:cursor-grabbing border-b border-border/50 shadow-sm"
+    <div className="overflow-hidden rounded-3xl border border-border/80 bg-card shadow-sm transition-all">
+      {/* אזור ראשי לחיץ לפתיחה/סגירה */}
+      <div
+        onClick={onToggleExpand}
+        className="p-4 flex flex-col gap-3 cursor-pointer active:bg-secondary/30 transition select-none"
       >
-        {/* Header: ID, Client, Delivery Badge */}
-        <div className="flex items-start justify-between gap-2.5">
+        <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-black text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
-                #{order.id}
+              <span className="text-[11px] font-black text-primary bg-primary/10 border border-primary/20 px-2.5 py-0.5 rounded-lg">
+                הזמנה #{order.id}
               </span>
-              <span className="text-xs font-bold text-muted-foreground truncate">
-                {order.time || "היום"}
-              </span>
+              <span className="text-xs font-bold text-muted-foreground">{order.time || "היום"}</span>
             </div>
-            <h2 className="text-base font-black text-foreground mt-1 leading-tight truncate">
+            <h3 className="text-base font-black text-foreground mt-1 leading-snug truncate">
               {order.client || "לקוח כללי"}
-            </h2>
+            </h3>
           </div>
 
-          <span
-            className={cn(
-              "h-8 flex items-center rounded-xl px-3 text-xs font-black border shrink-0 shadow-sm",
-              order.deliveryType === "מנוף"
-                ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
-                : "bg-primary/15 text-primary border-primary/30"
-            )}
-          >
-            {order.deliveryType || "פריקה רגילה"}
-          </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span
+              className={cn(
+                "h-8 flex items-center rounded-xl px-3 text-xs font-black border shadow-sm",
+                order.deliveryType === "מנוף"
+                  ? "bg-amber-500/15 text-amber-500 border-amber-500/30"
+                  : "bg-primary/15 text-primary border-primary/30"
+              )}
+            >
+              {order.deliveryType || "פריקה רגילה"}
+            </span>
+
+            <div className="grid size-8 place-items-center rounded-xl bg-secondary text-muted-foreground">
+              <motion.div animate={{ rotate: isExpanded ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                <ChevronDown className="size-4" />
+              </motion.div>
+            </div>
+          </div>
         </div>
 
-        {/* Destination & Warehouse */}
+        {/* יעד ומחסן מוצא */}
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground font-semibold">
           <div className="flex items-center gap-1">
             <MapPin className="size-3.5 text-primary shrink-0" />
@@ -458,72 +606,166 @@ function SwipeableOrderCard({
           )}
         </div>
 
-        {/* Products Details Box */}
-        <div className="rounded-xl border border-border/70 bg-secondary/35 p-3">
-          <p className="text-xs font-bold text-foreground leading-relaxed whitespace-pre-wrap">
-            {order.productsSummary || "אין פירוט פריטים זמין להזמנה זו"}
-          </p>
-        </div>
+        {/* תמצית פריטים מהירה במצב סגור */}
+        {!isExpanded && (
+          <div className="rounded-xl bg-secondary/30 px-3 py-2 text-xs font-semibold text-muted-foreground line-clamp-1 border border-border/50">
+            {order.productsSummary || "לחץ לצפייה בפירוט פריטים ומק\"טים"}
+          </div>
+        )}
+      </div>
 
-        {/* Touch Button Bar for Direct Floor Operation (ללא תלות רק ב-Swipe) */}
-        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-border/50">
-          {activeTab === "picking" ? (
-            <>
-              <button
-                type="button"
-                onClick={() => onDirectAction("בהכנה")}
-                className="h-11 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-secondary/70 text-xs font-black text-foreground active:scale-95 transition"
-              >
-                <Clock className="size-4 text-amber-500" />
-                <span>סמן בהכנה</span>
-              </button>
+      {/* אזור נפתח: פירוט פריטי ליקוט עם מק"טים וצ'קבוקס */}
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+            className="border-t border-border/70 bg-secondary/15 px-4 pt-3 pb-4 flex flex-col gap-3"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-foreground flex items-center gap-1.5">
+                <Layers className="size-3.5 text-primary" />
+                <span>רשימת פריטים לליקוט מהמגרש:</span>
+              </span>
+              <span className="text-[11px] font-bold text-muted-foreground">
+                {parsedItems.length} פריטים
+              </span>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => onDirectAction("מוכן להעמסה")}
-                className="h-11 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-black active:scale-95 transition shadow-sm"
-              >
-                <CheckCircle2 className="size-4" />
-                <span>מוכן להעמסה</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => onDirectAction("בהעמסה")}
-                className="h-11 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-secondary/70 text-xs font-black text-foreground active:scale-95 transition"
-              >
-                <PackageCheck className="size-4 text-primary" />
-                <span>בהעמסה</span>
-              </button>
+            {/* טבלת פריטים מעוצבת למחסנאי */}
+            <div className="flex flex-col gap-2">
+              {parsedItems.map((item, idx) => {
+                const isChecked = !!checkedItems[idx];
+                return (
+                  <div
+                    key={idx}
+                    onClick={(e) => toggleItemCheck(idx, e)}
+                    className={cn(
+                      "flex items-center justify-between gap-2.5 rounded-2xl border p-3 transition active:scale-[0.99] cursor-pointer",
+                      isChecked
+                        ? "border-emerald-500/40 bg-emerald-500/10 text-muted-foreground"
+                        : "border-border/70 bg-card text-foreground shadow-sm"
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <button
+                        type="button"
+                        className="text-primary shrink-0"
+                        title={isChecked ? "סומן כנאסף" : "סמן כנאסף"}
+                      >
+                        {isChecked ? (
+                          <CheckSquare className="size-5 text-emerald-500" />
+                        ) : (
+                          <Square className="size-5 text-muted-foreground" />
+                        )}
+                      </button>
 
-              <button
-                type="button"
-                onClick={() => onDirectAction("יצא לדרך")}
-                className="h-11 flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black active:scale-95 transition shadow-sm"
-              >
-                <Truck className="size-4" />
-                <span>יצא לדרך</span>
-              </button>
-            </>
-          )}
-        </div>
+                      <div className="min-w-0">
+                        <span
+                          className={cn(
+                            "text-xs font-bold block leading-snug",
+                            isChecked && "line-through opacity-70"
+                          )}
+                        >
+                          {item.name}
+                        </span>
 
-        {/* Bottom Driver / Swipe Hint */}
-        <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground pt-0.5">
-          <span className="flex items-center gap-1 text-primary">
-            <ChevronRight className="size-3.5" />
-            <span>החלק ימינה/שמאלה לאישור מהיר</span>
-            <ChevronLeft className="size-3.5" />
-          </span>
+                        {item.sku && (
+                          <span className="inline-block mt-0.5 rounded-md bg-secondary px-1.5 py-0.5 text-[10px] font-black text-primary border border-border/60">
+                            מק"ט: {item.sku}
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-          <span className="flex items-center gap-1 text-foreground/80">
-            <User className="size-3.5 text-muted-foreground" />
-            <span>{order.driver || "טרם שובץ"}</span>
-          </span>
-        </div>
-      </motion.div>
+                    <span className="rounded-xl bg-primary/10 border border-primary/20 px-2.5 py-1 text-xs font-black text-primary shrink-0">
+                      {item.quantity}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* פרטי נהג וקישור חיוג מהיר */}
+            <div className="flex items-center justify-between pt-2 border-t border-border/60 text-xs font-semibold">
+              <div className="flex items-center gap-1.5 text-foreground/80">
+                <User className="size-3.5 text-muted-foreground" />
+                <span>נהג: {order.driver || "טרם שובץ"}</span>
+              </div>
+
+              {order.phone && (
+                <a
+                  href={`tel:${order.phone}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-1 text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-xl"
+                >
+                  <Phone className="size-3" />
+                  <span>חייג</span>
+                </a>
+              )}
+            </div>
+
+            {/* כפתורי פעולה פיזיים בתחתית הכרטיס הנפתח */}
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              {activeTab === "picking" ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAdvanceStatus("בהכנה");
+                    }}
+                    className="h-11 flex items-center justify-center gap-1.5 rounded-2xl border border-border bg-card text-xs font-black text-foreground active:scale-95 transition shadow-sm"
+                  >
+                    <Clock className="size-4 text-amber-500" />
+                    <span>סמן בהכנה</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAdvanceStatus("מוכן להעמסה");
+                    }}
+                    className="h-11 flex items-center justify-center gap-1.5 rounded-2xl bg-primary text-primary-foreground text-xs font-black active:scale-95 transition shadow-md"
+                  >
+                    <CheckCircle2 className="size-4" />
+                    <span>הושלם ליקוט</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAdvanceStatus("בהעמסה");
+                    }}
+                    className="h-11 flex items-center justify-center gap-1.5 rounded-2xl border border-border bg-card text-xs font-black text-foreground active:scale-95 transition shadow-sm"
+                  >
+                    <PackageCheck className="size-4 text-primary" />
+                    <span>בהעמסה</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAdvanceStatus("יצא לדרך");
+                    }}
+                    className="h-11 flex items-center justify-center gap-1.5 rounded-2xl bg-emerald-600 text-white text-xs font-black active:scale-95 transition shadow-md"
+                  >
+                    <Truck className="size-4" />
+                    <span>שחרר נהג לדרך</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
