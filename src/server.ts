@@ -19,8 +19,11 @@ async function getServerEntry(): Promise<ServerEntry> {
   return serverEntryPromise;
 }
 
-// h3 swallows in-handler throws into a normal 500 Response with body
-// {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
+// כתובת גיליון ברירת מחדל
+const DEFAULT_CSV_SHEET_URL =
+  "https://docs.google.com/spreadsheets/d/1VA9J6n9IYcooO_s2xOpnkvyDQWWQD3pfhh0cnenCkoA/gviz/tq?tqx=out:csv&sheet=" +
+  encodeURIComponent("דשבורד_הזמנות");
+
 async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
@@ -50,6 +53,18 @@ export default {
     try {
       const url = new URL(request.url);
 
+      // טיפול ב-CORS Preflight (חיוני לבקשות מובייל)
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          },
+        });
+      }
+
       // Handle AI API endpoints server-side
       if (url.pathname === "/api/ai/insights" && request.method === "POST") {
         try {
@@ -73,13 +88,10 @@ export default {
         }
       }
 
-      // Handle Server-Side Google Sheets CSV Fetch Proxy (bypasses browser CORS & network blocks)
+      // Handle Server-Side Google Sheets CSV Fetch Proxy
       if (url.pathname === "/api/sheets/orders" && request.method === "GET") {
         try {
-          const sheetTargetUrl =
-            url.searchParams.get("url") ||
-            "https://docs.google.com/spreadsheets/d/1VA9J6n9IYcooO_s2xOpnkvyDQWWQD3pfhh0cnenCkoA/gviz/tq?tqx=out:csv&sheet=" +
-              encodeURIComponent("דשבורד_הזמנות");
+          const sheetTargetUrl = url.searchParams.get("url") || DEFAULT_CSV_SHEET_URL;
 
           const sep = sheetTargetUrl.includes("?") ? "&" : "?";
           const cacheBustedUrl = `${sheetTargetUrl}${sep}_t=${Date.now()}`;
@@ -116,7 +128,7 @@ export default {
         }
       }
 
-      // Handle Google Sheets Status Write-Back
+      // Handle Google Sheets Status Write-Back (סנכרון מלא לטלוויזיה ולגיליון)
       if (url.pathname === "/api/sheets/update-status" && request.method === "POST") {
         try {
           const body = (await request.json()) as {
@@ -127,8 +139,13 @@ export default {
             webhookUrl?: string;
             sheetName?: string;
           };
+
           const { orderId, status } = body;
-          const webhookUrl = body.webhookUrl || process.env.SHEETS_WEBHOOK_URL;
+          // שליפת כתובת Webhook מתוך גוף הבקשה, משתנה סביבה, או Fallback
+          const webhookUrl =
+            body.webhookUrl ||
+            (typeof process !== "undefined" ? process.env.SHEETS_WEBHOOK_URL : undefined);
+
           const sheetName = body.sheet || body.sheetName || "דשבורד_הזמנות";
           const action = body.action || "updateOrderStatus";
 
@@ -139,67 +156,52 @@ export default {
             );
           }
 
-          if (webhookUrl) {
-            const scriptRes = await fetch(webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action,
-                sheet: sheetName,
-                sheetName,
-                orderId,
-                status,
-              }),
-              redirect: "follow",
-            });
-
-            const responseText = await scriptRes.text();
-            let scriptJson: {
-              success?: boolean;
-              message?: string;
-              updatedAt?: string;
-              row?: number;
-              error?: string;
-            } | null = null;
-
+          // אם יש כתובת Webhook, שולחים ישירות ל-Google Apps Script
+          if (webhookUrl && webhookUrl.startsWith("http")) {
             try {
-              scriptJson = JSON.parse(responseText);
-            } catch {
-              /* response was not json */
-            }
-
-            if (scriptJson && scriptJson.success) {
-              return new Response(
-                JSON.stringify({
-                  success: true,
+              const scriptRes = await fetch(webhookUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action,
+                  sheet: sheetName,
+                  sheetName,
                   orderId,
                   status,
-                  syncedToSheet: true,
-                  message: scriptJson.message || `עודכן בהצלחה בעמודת סטטוס בגיליון ${sheetName}`,
-                  updatedAt: scriptJson.updatedAt || new Date().toISOString(),
-                  row: scriptJson.row,
+                  updatedBy: "אורן (סניף 4 החרש)",
+                  timestamp: new Date().toISOString(),
                 }),
-                { status: 200, headers: { "content-type": "application/json; charset=utf-8" } },
-              );
-            }
+                redirect: "follow",
+              });
 
-            return new Response(
-              JSON.stringify({
-                success: false,
-                orderId,
-                status,
-                syncedToSheet: false,
-                error:
-                  scriptJson?.error ||
-                  scriptJson?.message ||
-                  responseText.slice(0, 200) ||
-                  "Webhook error",
-              }),
-              { status: 200, headers: { "content-type": "application/json; charset=utf-8" } },
-            );
+              const responseText = await scriptRes.text();
+              let scriptJson: any = null;
+              try {
+                scriptJson = JSON.parse(responseText);
+              } catch {
+                /* response is not raw json */
+              }
+
+              if (scriptRes.ok || (scriptJson && scriptJson.success)) {
+                return new Response(
+                  JSON.stringify({
+                    success: true,
+                    orderId,
+                    status,
+                    syncedToSheet: true,
+                    message: scriptJson?.message || `עודכן בהצלחה בגיליון ${sheetName}`,
+                    updatedAt: new Date().toISOString(),
+                    row: scriptJson?.row,
+                  }),
+                  { status: 200, headers: { "content-type": "application/json; charset=utf-8" } },
+                );
+              }
+            } catch (whErr) {
+              console.error("שגיאה בפנייה ל-Apps Script Webhook:", whErr);
+            }
           }
 
-          // No webhook configured yet
+          // במידה ואין Webhook מוגדר, הסטטוס נשמר בזיכרון המערכת ומחזיר הנחיה להגדרה
           return new Response(
             JSON.stringify({
               success: true,
@@ -207,7 +209,7 @@ export default {
               status,
               syncedToSheet: false,
               message:
-                "הסטטוס עודכן בלוח ונשמר בזיכרון המערכת. לחץ על הגדרות שידור להפעלת Webhook לסנכרון ישיר ל-Google Sheets.",
+                "הסטטוס עודכן מקומית. להצגה בטלוויזיה יש להגדיר SHEETS_WEBHOOK_URL ב-Vercel.",
               updatedAt: new Date().toISOString(),
             }),
             { status: 200, headers: { "content-type": "application/json; charset=utf-8" } },
@@ -228,7 +230,10 @@ export default {
       if (url.pathname === "/api/sheets/test-connection" && request.method === "POST") {
         try {
           const body = (await request.json()) as { webhookUrl?: string };
-          const webhookUrl = body.webhookUrl || process.env.SHEETS_WEBHOOK_URL;
+          const webhookUrl =
+            body.webhookUrl ||
+            (typeof process !== "undefined" ? process.env.SHEETS_WEBHOOK_URL : undefined);
+
           if (!webhookUrl) {
             return new Response(
               JSON.stringify({ success: false, error: "לא סופקה כתובת Webhook" }),
@@ -244,12 +249,10 @@ export default {
           });
 
           const text = await testRes.text();
-          let json: { success?: boolean; message?: string; error?: string } | null = null;
+          let json: any = null;
           try {
             json = JSON.parse(text);
-          } catch {
-            /* not json */
-          }
+          } catch {}
 
           if (json && json.success) {
             return new Response(
@@ -264,8 +267,7 @@ export default {
           return new Response(
             JSON.stringify({
               success: false,
-              error:
-                json?.error || text.slice(0, 200) || `תגובה לא צפויה מ-Webhook (${testRes.status})`,
+              error: json?.error || text.slice(0, 200) || `תגובה לא צפויה מ-Webhook (${testRes.status})`,
             }),
             { status: 200, headers: { "content-type": "application/json; charset=utf-8" } },
           );
@@ -292,7 +294,9 @@ export default {
             webhookUrl?: string;
           };
 
-          const webhookUrl = body.webhookUrl || process.env.SHEETS_WEBHOOK_URL;
+          const webhookUrl =
+            body.webhookUrl ||
+            (typeof process !== "undefined" ? process.env.SHEETS_WEBHOOK_URL : undefined);
           const sheetName = body.sheetName || "היסטוריית_שיחות_נועה";
           const action = body.action || "REPLENISHMENT_DISPATCHED";
 
@@ -303,8 +307,8 @@ export default {
               body: JSON.stringify({
                 action,
                 sheetName,
-                caller: body.caller || "מחסנאי",
-                warehouse: body.warehouse || "ח. סבן",
+                caller: body.caller || "אורן",
+                warehouse: body.warehouse || "סניף 4 החרש",
                 summary: body.summary || "",
                 timestamp: new Date().toISOString(),
               }),
