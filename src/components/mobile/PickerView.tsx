@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   PackageCheck,
@@ -34,7 +34,6 @@ import {
   Layers,
   Plus,
   Minus,
-  Phone,
   Bell,
 } from "lucide-react";
 import { useDispatchBoard } from "@/context/DispatchContext";
@@ -58,13 +57,7 @@ interface PickerViewProps {
   onOpenTraffic?: () => void;
 }
 
-interface ParsedItem {
-  sku?: string;
-  name: string;
-  quantity: string;
-}
-
-const BEIT_HATIT_PHONE = "972500000000"; // יש לעדכן למספר הישיר של ספק בית הטיט
+const BEIT_HATIT_PHONE = "972500000000";
 
 interface TruckDraft {
   sandBags: number;
@@ -74,15 +67,15 @@ interface TruckDraft {
   sumsumSmallPallets: number;
 }
 
-function LiveKpiBanner({ orders }: { orders: Order[] }) {
+function LiveKpiBanner({ orders = [] }: { orders: Order[] }) {
   const [isOpen, setIsOpen] = useState(true);
-  const bales = orders.reduce((sum, order) => sum + (order.logisticsMetrics?.bellaBags || 0), 0);
-  const pallets = orders.reduce((sum, order) => sum + (order.logisticsMetrics?.sabanPallets || 0), 0);
+  const bales = orders.reduce((sum, order) => sum + (order?.logisticsMetrics?.bellaBags || 0), 0);
+  const pallets = orders.reduce((sum, order) => sum + (order?.logisticsMetrics?.sabanPallets || 0), 0);
   const active = orders.filter(
-    (order) => order.status === "ממתין" || order.status === "בהכנה",
+    (order) => order?.status === "ממתין" || order?.status === "בהכנה",
   ).length;
   const loadReady = orders.filter(
-    (order) => order.status === "מוכן להעמסה" || order.status === "בהעמסה",
+    (order) => order?.status === "מוכן להעמסה" || order?.status === "בהעמסה",
   ).length;
 
   return (
@@ -182,7 +175,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
 
-  // טיוטת משאית מול בית הטיט
   const [truckDraft, setTruckDraft] = useState<TruckDraft>({
     sandBags: 0,
     sumsumBags: 0,
@@ -191,20 +183,13 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
     sumsumSmallPallets: 0,
   });
 
-  // התראת Popup מיידית בהזמנת 10 בלות סומסום ומעלה
   const [activeAlert, setActiveAlert] = useState<{
     orderId: string;
     client: string;
     sumsumCount: number;
   } | null>(null);
 
-  const [isMuted, setIsMuted] = useState(() => {
-    try {
-      return isAudioMuted();
-    } catch {
-      return false;
-    }
-  });
+  const [isMuted, setIsMuted] = useState(false);
 
   const { isInstallable, promptInstall, isIOS } = usePwaInstall();
   const [showInstallBanner, setShowInstallBanner] = useState(true);
@@ -213,6 +198,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
 
   useEffect(() => {
     try {
+      setIsMuted(isAudioMuted());
       return subscribeSoundMute((muted) => setIsMuted(muted));
     } catch {
       return () => {};
@@ -238,13 +224,12 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
   };
 
   const copyToClipboard = async (text: string, key: string) => {
+    if (typeof window === "undefined" || !navigator.clipboard) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2500);
-    } catch {
-      // fallback
-    }
+    } catch {}
   };
 
   const toggleExpand = (orderId: string) => {
@@ -261,7 +246,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
 
   const safePublished = useMemo(() => (Array.isArray(published) ? published : []), [published]);
 
-  // זיהוי הזמנות עם 10 בלות סומסום ומעלה לטובת ה-Popup
   useEffect(() => {
     safePublished.forEach((order) => {
       if (!order) return;
@@ -289,14 +273,12 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
       if (selectedProfile !== "all" && !warehouseMatchesProfile(order.warehouse, selectedProfile))
         return false;
 
-      // Status filter based on active mobile tab
       if (activeTab === "picking") {
         if (order.status === "סופק" || order.status === "יצא לדרך" || order.status === "מוכן להעמסה" || order.status === "בהעמסה") return false;
       } else if (activeTab === "ready") {
         if (order.status !== "מוכן להעמסה" && order.status !== "בהעמסה") return false;
       }
 
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchCust = (order.customerName || "").toLowerCase().includes(q);
@@ -323,7 +305,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
     return { active, ready };
   }, [safePublished, selectedProfile]);
 
-  // קיבולת משאית בית הטיט
   const totalDraftBags = truckDraft.sandBags + truckDraft.sumsumBags + truckDraft.titBags;
   const totalSmallPallets = truckDraft.sandSmallPallets + truckDraft.sumsumSmallPallets;
   const isFullTruck = totalDraftBags >= 30;
@@ -348,12 +329,14 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
       .join("\n");
 
     const url = `https://wa.me/${BEIT_HATIT_PHONE}?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+    if (typeof window !== "undefined") {
+      window.open(url, "_blank");
+    }
   };
 
   return (
     <div dir="rtl" className="min-h-screen overflow-x-hidden bg-background text-foreground font-sans pb-28 selection:bg-amber-500 selection:text-slate-950">
-      {/* Top Mobile Header */}
+      {/* Header */}
       <header className="sticky top-0 z-40 bg-card/95 backdrop-blur-md border-b border-border px-3.5 pt-2.5 pb-2 shadow-sm">
         <div className="flex items-center justify-between gap-2 max-w-2xl mx-auto">
           <div className="flex items-center gap-2 min-w-0">
@@ -371,7 +354,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Theme Toggle Button מובלט */}
+            {/* Theme Toggle Button */}
             <button
               type="button"
               onClick={toggleTheme}
@@ -401,7 +384,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               {isMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
             </button>
 
-            {/* Sync Refresh */}
+            {/* Refresh */}
             <button
               type="button"
               onClick={() => syncNow()}
@@ -414,12 +397,12 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               />
             </button>
 
-            {/* Traffic & Waze Live Map */}
+            {/* Waze / Traffic */}
             {onOpenTraffic && (
               <button
                 type="button"
                 onClick={onOpenTraffic}
-                title="מפת פקקים חיה ו-Waze"
+                title="מפת פקקים חיה"
                 className="size-10 rounded-xl bg-card border border-sky-500/40 text-sky-500 hover:bg-sky-500/10 transition-all flex items-center justify-center relative active:scale-95 shadow-sm"
               >
                 <Compass className="size-4 text-sky-500" />
@@ -429,7 +412,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
           </div>
         </div>
 
-        {/* שורת הודעות זזות (Mobile Marquee Ticker) */}
+        {/* Ticker */}
         <div className="max-w-2xl mx-auto mt-2 flex items-center gap-2 overflow-hidden rounded-xl border border-primary/20 bg-primary/10 px-2.5 py-1 shadow-inner">
           <div className="flex items-center gap-1 text-[10px] font-black text-primary shrink-0 border-l border-primary/20 pl-2">
             <Bell className="size-3 animate-bounce" />
@@ -442,14 +425,14 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               animate={{ x: [250, -600] }}
               transition={{ repeat: Infinity, duration: 18, ease: "linear" }}
             >
-              <span>🚚 חכמת (מרצדס מנוף): עד 12T / 18 בלות | בלוק 1.5T עם חיוב פקדון</span>
+              <span>🚚 חכמת (מרצדס מנוף): עד 12T / 18 בלות | בלוק 1.5T עם פקדון</span>
               <span>🚛 עלי (איסוזו פלטה): עד 5.5T | ללא פקדונות משטחים</span>
-              <span>📦 ספק בית הטיט: משאיות של עד 30 בלות | שקיות במשטח: 70 שק</span>
+              <span>📦 ספק בית הטיט: משאיות של עד 30 בלות | שקיות במשטח: 70 יח'</span>
             </motion.div>
           </div>
         </div>
 
-        {/* Picker Persona Selector */}
+        {/* Persona Selector */}
         <div className="max-w-2xl mx-auto mt-2">
           <div className="grid grid-cols-3 gap-1 p-1 bg-muted/60 rounded-2xl border border-border text-xs font-bold">
             <button
@@ -497,7 +480,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
         </div>
       </header>
 
-      {/* Popup התרעה דחופה למשיכת 10 בלות סומסום */}
+      {/* Popup 10 בלות סומסום */}
       <AnimatePresence>
         {activeAlert && (
           <motion.div
@@ -550,7 +533,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
 
       {/* Main Container */}
       <main className="max-w-2xl mx-auto px-3.5 pt-3 space-y-3.5">
-        {/* PWA Install Banner */}
         {isInstallable && showInstallBanner && (
           <div className="bg-card border border-border/80 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -585,9 +567,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
           </div>
         )}
 
-        {/* תוכן הטאב הפעיל */}
         {activeTab === "truck_builder" ? (
-          /* טאב הרכבת משאית מול בית הטיט */
           <div className="space-y-3">
             <div className="rounded-2xl border border-border/80 bg-card p-3.5 shadow-sm">
               <div className="flex items-center justify-between mb-1.5">
@@ -600,7 +580,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
                 </span>
               </div>
 
-              {/* Progress Bar תפוסה */}
               <div className="mt-2">
                 <div className="flex justify-between text-xs font-bold mb-1">
                   <span className="text-muted-foreground">תפוסת בלות:</span>
@@ -620,7 +599,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               </div>
             </div>
 
-            {/* כפתורי בלות */}
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-2xl border border-border bg-card p-2.5 text-center flex flex-col justify-between">
                 <span className="text-xs font-bold text-muted-foreground">בלות חול</span>
@@ -680,7 +658,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               </div>
             </div>
 
-            {/* הוספת משטחי שקיות (70 שקיות למשטח) */}
             <div className="rounded-2xl border border-border bg-card p-3 shadow-sm">
               <span className="text-xs font-black text-muted-foreground block mb-2">
                 משטחי שקיות (אריזת יצרן בית הטיט: 70 שקיות למשטח):
@@ -732,7 +709,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               </div>
             </div>
 
-            {/* כפתור סגירת משאית ושליחה לספק */}
             <button
               onClick={sendBeitHatitWhatsApp}
               disabled={totalDraftBags === 0 && totalSmallPallets === 0}
@@ -743,7 +719,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
             </button>
           </div>
         ) : activeTab === "inventory" ? (
-          /* טאב מלאי מגרש ורכש */
           <div className="space-y-3">
             <LiveKpiBanner orders={safePublished} />
             <InventoryDemandCard
@@ -771,9 +746,7 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
             />
           </div>
         ) : (
-          /* טאב רשימת הזמנות (לליקוט או בהעמסה) */
           <div className="space-y-3">
-            {/* Search input */}
             <div className="relative">
               <Search className="size-4 text-muted-foreground absolute right-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -936,19 +909,19 @@ function PickerOrderCard({
   }, []);
 
   const pickingStartedAt = useMemo(() => {
-    if (order.pickingStartedAt) return order.pickingStartedAt;
+    if (order?.pickingStartedAt) return order.pickingStartedAt;
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`saban_picker_start_${order.orderId}`);
+      const saved = localStorage.getItem(`saban_picker_start_${order?.orderId}`);
       if (saved) {
         const t = parseInt(saved, 10);
         if (!isNaN(t)) return t;
       }
     }
     return null;
-  }, [order.pickingStartedAt, order.orderId]);
+  }, [order?.pickingStartedAt, order?.orderId]);
 
   const { remainingSeconds, isOverrun } = useMemo(() => {
-    if (order.status !== "בהכנה" || !pickingStartedAt) {
+    if (order?.status !== "בהכנה" || !pickingStartedAt) {
       return { remainingSeconds: PICKING_SLA_SECONDS, isOverrun: false };
     }
     const elapsed = Math.floor((currentTimeMs - pickingStartedAt) / 1000);
@@ -957,17 +930,17 @@ function PickerOrderCard({
       remainingSeconds: remain,
       isOverrun: remain <= 0,
     };
-  }, [order.status, pickingStartedAt, currentTimeMs, PICKING_SLA_SECONDS]);
+  }, [order?.status, pickingStartedAt, currentTimeMs, PICKING_SLA_SECONDS]);
 
   useEffect(() => {
-    if (order.status === "בהכנה" && isOverrun && !hasAlertedOverrun) {
+    if (order?.status === "בהכנה" && isOverrun && !hasAlertedOverrun) {
       setHasAlertedOverrun(true);
       onReportOverrun(order.orderId);
     }
-  }, [order.status, isOverrun, hasAlertedOverrun, order.orderId, onReportOverrun]);
+  }, [order?.status, isOverrun, hasAlertedOverrun, order?.orderId, onReportOverrun]);
 
-  const approvedCount = (order.items || []).filter((i) => i?.isApproved).length;
-  const totalItems = (order.items || []).length;
+  const approvedCount = (order?.items || []).filter((i) => i?.isApproved).length;
+  const totalItems = (order?.items || []).length;
   const allItemsChecked = totalItems > 0 && approvedCount === totalItems;
 
   const formatTimer = (secs: number) => {
@@ -977,27 +950,25 @@ function PickerOrderCard({
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  // בדיקת כללי משאיות חכמת מול עלי
-  const isHikmat = (order.driver || "").includes("חכמת");
-  const isAli = (order.driver || "").includes("עלי");
+  const isHikmat = (order?.driver || "").includes("חכמת");
+  const isAli = (order?.driver || "").includes("עלי");
 
   return (
     <div
       className={cn(
         "rounded-2xl border transition-all duration-300 overflow-hidden shadow-sm",
-        isOverrun && order.status === "בהכנה"
+        isOverrun && order?.status === "בהכנה"
           ? "bg-rose-950/20 border-rose-500 animate-pulse ring-2 ring-rose-500/50"
-          : order.status === "בהכנה"
+          : order?.status === "בהכנה"
             ? "bg-card border-amber-500/40 ring-1 ring-amber-500/20"
-            : order.status === "מוכן להעמסה"
+            : order?.status === "מוכן להעמסה"
               ? "bg-card border-indigo-500/40 ring-1 ring-indigo-500/20"
-              : order.status === "סופק"
+              : order?.status === "סופק"
                 ? "bg-card/70 border-border opacity-85"
                 : "bg-card border-border hover:border-primary/50",
       )}
     >
-      {/* Overrun Warning Header */}
-      {isOverrun && order.status === "בהכנה" && (
+      {isOverrun && order?.status === "בהכנה" && (
         <div className="bg-rose-600 text-white px-3 py-1.5 text-xs font-black flex items-center justify-between animate-bounce">
           <div className="flex items-center gap-1.5">
             <Flame className="size-4 text-amber-300 fill-amber-300" />
@@ -1010,45 +981,42 @@ function PickerOrderCard({
       )}
 
       <div className="p-3.5 space-y-2.5">
-        {/* Top Header */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-secondary text-foreground border border-border">
-                #{order.orderId}
+                #{order?.orderId}
               </span>
               <span className="text-[11px] text-muted-foreground flex items-center gap-1">
                 <Warehouse className="size-3 text-amber-500" />
-                {order.warehouse || "סניף 4 החרש"}
+                {order?.warehouse || "סניף 4 החרש"}
               </span>
             </div>
             <h3 className="text-sm font-black text-foreground mt-1 leading-snug truncate">
-              {order.customerName}
+              {order?.customerName || "לקוח כללי"}
             </h3>
           </div>
 
           <div className="flex flex-col items-end gap-1 shrink-0">
-            <StatusBadge status={order.status} size="sm" />
+            <StatusBadge status={order?.status} size="sm" />
             <div className="flex items-center gap-1 text-[11px] font-bold text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
               <Clock className="size-3" />
-              <span>יעד: {order.targetTime}</span>
+              <span>יעד: {order?.targetTime}</span>
             </div>
           </div>
         </div>
 
-        {/* כתובת ונהג */}
         <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/60">
           <div className="flex items-center gap-1 truncate">
             <MapPin className="size-3 text-primary shrink-0" />
-            <span className="truncate">{order.address ? `${order.address}, ${order.city}` : order.city}</span>
+            <span className="truncate">{order?.address ? `${order.address}, ${order.city}` : order?.city}</span>
           </div>
           <div className="flex items-center gap-1 text-foreground font-bold shrink-0">
             <Truck className="size-3 text-muted-foreground" />
-            <span>{order.driver || "טרם שובץ"}</span>
+            <span>{order?.driver || "טרם שובץ"}</span>
           </div>
         </div>
 
-        {/* חיווי הגבלת משאית ייעודית (חכמת מול עלי) */}
         <div className="p-2 rounded-xl bg-secondary/40 border border-border text-[11px] font-bold flex items-center justify-between">
           <span className="text-muted-foreground">פרופיל העמסה:</span>
           <span className={cn("font-black", isHikmat ? "text-amber-500" : isAli ? "text-primary" : "text-foreground")}>
@@ -1060,28 +1028,26 @@ function PickerOrderCard({
           </span>
         </div>
 
-        {/* מדדי שקים ומשקל */}
         <div className="grid grid-cols-3 gap-1.5 py-1 bg-secondary/30 rounded-xl p-2 border border-border text-center">
           <div>
             <span className="block text-[9px] text-muted-foreground font-bold">שקי בלה</span>
-            <span className="text-xs font-black text-primary">{order.logisticsMetrics?.bellaBags || 0}</span>
+            <span className="text-xs font-black text-primary">{order?.logisticsMetrics?.bellaBags || 0}</span>
           </div>
           <div>
             <span className="block text-[9px] text-muted-foreground font-bold">משטחי סבן</span>
-            <span className="text-xs font-black text-amber-500">{order.logisticsMetrics?.sabanPallets || 0}</span>
+            <span className="text-xs font-black text-amber-500">{order?.logisticsMetrics?.sabanPallets || 0}</span>
           </div>
           <div>
             <span className="block text-[9px] text-muted-foreground font-bold">משקל משוער</span>
             <span className="text-xs font-black text-foreground">
-              {(order.logisticsMetrics?.estimatedWeightKg || 0) >= 1000
-                ? `${((order.logisticsMetrics?.estimatedWeightKg || 0) / 1000).toFixed(1)}T`
-                : `${order.logisticsMetrics?.estimatedWeightKg || 0} ק״ג`}
+              {(order?.logisticsMetrics?.estimatedWeightKg || 0) >= 1000
+                ? `${((order?.logisticsMetrics?.estimatedWeightKg || 0) / 1000).toFixed(1)}T`
+                : `${order?.logisticsMetrics?.estimatedWeightKg || 0} ק״ג`}
             </span>
           </div>
         </div>
 
-        {/* SLA Bar */}
-        {order.status === "בהכנה" && (
+        {order?.status === "בהכנה" && (
           <div
             className={cn(
               "rounded-xl p-2.5 border flex items-center justify-between gap-2 shadow-inner",
@@ -1102,7 +1068,6 @@ function PickerOrderCard({
           </div>
         )}
 
-        {/* רשימת מק"טים נפתחת בלחיצה */}
         <div className="pt-1 border-t border-border">
           <button
             type="button"
@@ -1131,7 +1096,7 @@ function PickerOrderCard({
                 </button>
               </div>
 
-              {(order.items || []).map((item) => (
+              {(order?.items || []).map((item) => (
                 <div
                   key={item.sku}
                   onClick={() => onToggleItem(order.orderId, item.sku)}
@@ -1165,9 +1130,8 @@ function PickerOrderCard({
           )}
         </div>
 
-        {/* כפתורי פעולה */}
         <div className="pt-1.5">
-          {order.status === "ממתין" && (
+          {order?.status === "ממתין" && (
             <button
               type="button"
               onClick={() => onStartPicking(order.orderId, activePicker)}
@@ -1178,7 +1142,7 @@ function PickerOrderCard({
             </button>
           )}
 
-          {order.status === "בהכנה" && (
+          {order?.status === "בהכנה" && (
             <button
               type="button"
               onClick={() => onFinishPicking(order.orderId)}
@@ -1189,7 +1153,7 @@ function PickerOrderCard({
             </button>
           )}
 
-          {order.status === "מוכן להעמסה" && (
+          {order?.status === "מוכן להעמסה" && (
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -1210,7 +1174,7 @@ function PickerOrderCard({
             </div>
           )}
 
-          {order.status === "בהעמסה" && (
+          {order?.status === "בהעמסה" && (
             <button
               type="button"
               onClick={() => onUpdateStatus(order.orderId, "יצא לדרך")}
@@ -1221,7 +1185,7 @@ function PickerOrderCard({
             </button>
           )}
 
-          {order.status === "יצא לדרך" && (
+          {order?.status === "יצא לדרך" && (
             <button
               type="button"
               onClick={() => onUpdateStatus(order.orderId, "סופק")}
