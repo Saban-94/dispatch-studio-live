@@ -1,6 +1,8 @@
 import type { Order } from "@/types/dispatch";
+import type { NormalizedProductSlideItem, ScreensaverBranchFilter } from "@/types/screensaver";
 import {
   PREDEFINED_SAFETY_STOCKS,
+  PRODUCT_IMAGES,
   type SafetyStockRule,
   evaluateItemStock,
   parseColumnHProductText,
@@ -269,4 +271,400 @@ export function calculateLiveInventory(
     completedOrdersCount,
     lastCalculatedAt: new Date().toISOString(),
   };
+}
+
+export interface InventoryItemRule {
+  id: string;
+  sku?: string;
+  name: string;
+  category:
+    "cement" | "plaster" | "adhesive" | "big_bag" | "block" | "iron" | "gypsum" | "other" | string;
+  initialBase: number;
+  unit: string;
+  safetyThreshold: number;
+}
+
+export interface InventoryItemCalculatedStatus {
+  rule: InventoryItemRule;
+  actualDrawn: number;
+  reserved: number;
+  totalDemanded: number;
+  effectiveBalance: number;
+  percentRemaining: number;
+  isCritical: boolean;
+  isWarning: boolean;
+  deficitToRefill: number;
+  palletsToRefill: number;
+}
+
+export interface DetailedInventoryKpis {
+  ordersAnalyzedCount: number;
+  totalDrawnCount: number;
+  totalReservedCount: number;
+  itemsAtRiskCount: number;
+  criticalAlertsCount: number;
+  fullTrailersRequired: number;
+  totalPalletsNeeded: number;
+  burnRatePerHour: number;
+  fastestMovingItemName: string;
+  lastCalculatedAt: string;
+}
+
+export interface DetailedInventoryInsights {
+  burnRateSummary: string;
+  isOverCapacityAlert: boolean;
+  transportAdvice: string;
+  priorityReplenishItems: InventoryItemCalculatedStatus[];
+  whatsappProcurementText: string;
+  whatsappUrl: string;
+}
+
+function filterOrdersByBranch(orders: Order[], branchFilter: ScreensaverBranchFilter): Order[] {
+  if (branchFilter === "branch_4") {
+    return orders.filter((o) => {
+      const w = (o.warehouse || "").trim();
+      if (!w) return true;
+      if (/סניף 1|מחסן 1|מחסן 30|התלמיד/i.test(w)) return false;
+      return true;
+    });
+  }
+  if (branchFilter === "branch_1") {
+    return orders.filter((o) => {
+      const w = (o.warehouse || "").trim();
+      if (!w) return false;
+      return /סניף 1|מחסן 1|מחסן 30|התלמיד|תלמיד/i.test(w);
+    });
+  }
+  return orders;
+}
+
+function getUnitsPerPallet(category: string, name: string): number {
+  const n = name.toLowerCase();
+  if (/מלט/i.test(n)) return 40;
+  if (/דבק|טיח|שפכטל|ספירבונד|ביג גב/i.test(n)) return 40;
+  if (/בלוק|איטונג/i.test(n)) {
+    return /10/i.test(n) ? 150 : 75;
+  }
+  if (/בלה|שק גדול/i.test(n) || category === "big_bag") return 1;
+  return 40;
+}
+
+/**
+ * Calculates detailed inventory engine statistics, KPIs, and procurement insights
+ * used by the InventoryAlertSlide screensaver slide.
+ */
+export function calculateDetailedInventoryEngine(
+  orders: Order[],
+  now: Date = new Date(),
+  branchFilter: ScreensaverBranchFilter = "all",
+): {
+  kpis: DetailedInventoryKpis;
+  items: InventoryItemCalculatedStatus[];
+  insights: DetailedInventoryInsights;
+} {
+  const relevantOrders = filterOrdersByBranch(orders, branchFilter);
+
+  // Initialize aggregated map for all predefined rules
+  const ruleMap = new Map<
+    string,
+    {
+      rule: InventoryItemRule;
+      actualDrawn: number;
+      reserved: number;
+      ordersSet: Set<string>;
+    }
+  >();
+
+  PREDEFINED_SAFETY_STOCKS.forEach((stockRule) => {
+    const id = stockRule.sku || stockRule.productName;
+    ruleMap.set(id, {
+      rule: {
+        id,
+        sku: stockRule.sku,
+        name: stockRule.productName,
+        category: stockRule.category,
+        initialBase: stockRule.initialStock,
+        unit: stockRule.unit,
+        safetyThreshold: stockRule.safetyStockLevel,
+      },
+      actualDrawn: 0,
+      reserved: 0,
+      ordersSet: new Set<string>(),
+    });
+  });
+
+  // Aggregate orders by status
+  relevantOrders.forEach((order) => {
+    const isDrawn = ["בהעמסה", "יצא לדרך", "סופק"].includes(order.status);
+    const isReserved = ["ממתין", "בסידור עבודה", "בהכנה", "מוכן להעמסה"].includes(order.status);
+
+    // Extract items from formatted column H
+    const parsed = order.itemsFormatted ? parseColumnHProductText(order.itemsFormatted) : [];
+
+    parsed.forEach((it) => {
+      // Find matching rule
+      let matchedEntry: ReturnType<typeof ruleMap.get> | undefined;
+      for (const entry of ruleMap.values()) {
+        if (it.sku && entry.rule.sku === it.sku) {
+          matchedEntry = entry;
+          break;
+        }
+        const ruleNameLower = entry.rule.name.toLowerCase();
+        const itNameLower = it.name.toLowerCase();
+        if (ruleNameLower.includes(itNameLower) || itNameLower.includes(ruleNameLower)) {
+          matchedEntry = entry;
+          break;
+        }
+      }
+
+      if (matchedEntry) {
+        if (isDrawn) matchedEntry.actualDrawn += it.quantity;
+        if (isReserved) matchedEntry.reserved += it.quantity;
+        matchedEntry.ordersSet.add(order.orderId);
+      }
+    });
+
+    // Special Bella Bags tracking (SKU 11511)
+    if (order.logisticsMetrics?.bellaBags && order.logisticsMetrics.bellaBags > 0) {
+      const entry = ruleMap.get("11511");
+      if (entry) {
+        if (isDrawn) entry.actualDrawn += order.logisticsMetrics.bellaBags;
+        if (isReserved) entry.reserved += order.logisticsMetrics.bellaBags;
+        entry.ordersSet.add(order.orderId);
+      }
+    }
+  });
+
+  // Transform into calculated items
+  const items: InventoryItemCalculatedStatus[] = [];
+  let totalDrawnCount = 0;
+  let totalReservedCount = 0;
+  let itemsAtRiskCount = 0;
+  let criticalAlertsCount = 0;
+  let totalPalletsNeeded = 0;
+  let fastestMovingItemName = "מלט אפור 25 ק״ג נשר";
+  let maxDrawn = -1;
+
+  for (const entry of ruleMap.values()) {
+    const { rule, actualDrawn, reserved } = entry;
+    const totalDemanded = actualDrawn + reserved;
+    const effectiveBalance = Math.max(0, rule.initialBase - totalDemanded);
+    const percentRemaining = Math.max(
+      0,
+      Math.min(100, Math.round((effectiveBalance / (rule.initialBase || 1)) * 100)),
+    );
+
+    const isCritical =
+      effectiveBalance <= Math.floor(rule.safetyThreshold * 0.5) ||
+      (rule.safetyThreshold > 0 && effectiveBalance <= 0);
+    const isWarning = !isCritical && effectiveBalance <= rule.safetyThreshold;
+
+    const deficitToRefill = Math.max(0, rule.initialBase - effectiveBalance);
+    const unitsPerPallet = getUnitsPerPallet(rule.category, rule.name);
+    const palletsToRefill =
+      deficitToRefill > 0 ? Math.max(1, Math.ceil(deficitToRefill / unitsPerPallet)) : 0;
+
+    totalDrawnCount += actualDrawn;
+    totalReservedCount += reserved;
+    if (isCritical) criticalAlertsCount++;
+    if (isCritical || isWarning) itemsAtRiskCount++;
+    if (deficitToRefill > 0) totalPalletsNeeded += palletsToRefill;
+
+    if (actualDrawn > maxDrawn) {
+      maxDrawn = actualDrawn;
+      fastestMovingItemName = rule.name;
+    }
+
+    items.push({
+      rule,
+      actualDrawn,
+      reserved,
+      totalDemanded,
+      effectiveBalance,
+      percentRemaining,
+      isCritical,
+      isWarning,
+      deficitToRefill,
+      palletsToRefill,
+    });
+  }
+
+  // Sort: critical first, then warning, then highest demand
+  items.sort((a, b) => {
+    if (a.isCritical && !b.isCritical) return -1;
+    if (!a.isCritical && b.isCritical) return 1;
+    if (a.isWarning && !b.isWarning) return -1;
+    if (!a.isWarning && b.isWarning) return 1;
+    return b.totalDemanded - a.totalDemanded;
+  });
+
+  const fullTrailersRequired = Math.ceil(totalPalletsNeeded / 24);
+  const hoursSinceStart = Math.max(1, Math.min(12, now.getHours() - 6));
+  const burnRatePerHour = Math.round(totalDrawnCount / hoursSinceStart);
+
+  const lastCalculatedAt = now.toLocaleTimeString("he-IL", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
+  const priorityReplenishItems = items.filter((i) => i.isCritical || i.isWarning);
+  const isOverCapacityAlert = fullTrailersRequired >= 2 || criticalAlertsCount >= 3;
+
+  const transportAdvice =
+    fullTrailersRequired > 0
+      ? `נדרשים ~${fullTrailersRequired} פול-טריילר/ים (${totalPalletsNeeded} משטחים) לחידוש מלאי מלא מהספקים.`
+      : "קצב רצפה מאוזן ללא חריגת שינוע.";
+
+  const burnRateSummary = `קצב משיכה ממוצע של ${burnRatePerHour} יח'/שעה מתחילת הפעילות.`;
+
+  // Build WhatsApp procurement message
+  const branchLabel =
+    branchFilter === "branch_4"
+      ? "מגרש 4 - החרש (ראשי)"
+      : branchFilter === "branch_1"
+        ? "סניף 1 - התלמיד"
+        : "כללי (כל המחסנים)";
+
+  const waLines = [
+    `*📋 דרישת רכש והשלמת מלאי חצר — ח. סבן חומרי בניין (1994) בע״מ*`,
+    `📅 שעת הפקה: ${lastCalculatedAt} | מגרש: ${branchLabel}`,
+    `סה"כ משיכות היום: ${totalDrawnCount} יח' | משוריין בהכנה: ${totalReservedCount} יח'`,
+    `----------------------------------------`,
+  ];
+
+  if (priorityReplenishItems.length === 0) {
+    waLines.push(`✅ כל מוצרי המלאי נמצאים כעת מעל סף הביטחון.`);
+  } else {
+    waLines.push(`*נמצאו ${priorityReplenishItems.length} פריטים הדורשים חידוש מלאי:*`);
+    priorityReplenishItems.forEach((it, idx) => {
+      const badge = it.isCritical ? "🔴 קריטי" : "🟡 אזהרה";
+      waLines.push(
+        `${idx + 1}. *${it.rule.name}* (${badge})\n` +
+          `   • יתרת רצפה: ${it.effectiveBalance} ${it.rule.unit} (סף מינימום: ${it.rule.safetyThreshold})\n` +
+          `   • חסר להשלמה: *${it.deficitToRefill} ${it.rule.unit}* (~${it.palletsToRefill} משטחים)`,
+      );
+    });
+  }
+
+  if (fullTrailersRequired > 0) {
+    waLines.push(`----------------------------------------`);
+    waLines.push(
+      `🚚 *צפי הובלה נדרשת:* ${fullTrailersRequired} פול-טריילר (~${totalPalletsNeeded} משטחים)`,
+    );
+  }
+
+  waLines.push(`----------------------------------------`);
+  waLines.push(`נשלח אוטומטית ממערכת SabanOS Control Plane`);
+
+  const whatsappProcurementText = waLines.join("\n");
+  const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsappProcurementText)}`;
+
+  return {
+    kpis: {
+      ordersAnalyzedCount: relevantOrders.length,
+      totalDrawnCount,
+      totalReservedCount,
+      itemsAtRiskCount,
+      criticalAlertsCount,
+      fullTrailersRequired,
+      totalPalletsNeeded,
+      burnRatePerHour,
+      fastestMovingItemName,
+      lastCalculatedAt,
+    },
+    items,
+    insights: {
+      burnRateSummary,
+      isOverCapacityAlert,
+      transportAdvice,
+      priorityReplenishItems,
+      whatsappProcurementText,
+      whatsappUrl,
+    },
+  };
+}
+
+/**
+ * Returns normalized items formatted for the ProductSlide screensaver carousel.
+ */
+export function getNormalizedProductSlideItems(
+  orders: Order[],
+  branchFilter: ScreensaverBranchFilter = "all",
+  prioritizeCritical = true,
+): NormalizedProductSlideItem[] {
+  const { items } = calculateDetailedInventoryEngine(orders, new Date(), branchFilter);
+
+  const branchName =
+    branchFilter === "branch_4"
+      ? "מגרש 4 - החרש"
+      : branchFilter === "branch_1"
+        ? "סניף 1 - התלמיד"
+        : "מגרש 4 - החרש (ראשי)";
+
+  const branchNumber: 1 | 4 | "all" =
+    branchFilter === "branch_4" ? 4 : branchFilter === "branch_1" ? 1 : "all";
+
+  // Map each item to NormalizedProductSlideItem
+  const result: NormalizedProductSlideItem[] = items.map((it) => {
+    const unitsPerPallet = getUnitsPerPallet(it.rule.category, it.rule.name);
+    const skuKey = it.rule.sku || "";
+    const imageUrl =
+      PRODUCT_IMAGES[skuKey] || PRODUCT_IMAGES[it.rule.category] || PRODUCT_IMAGES.default;
+
+    const requiresFullTrailer =
+      it.palletsToRefill >= 20 || (it.rule.category === "big_bag" && it.deficitToRefill >= 14);
+
+    const procurementAdvice = requiresFullTrailer
+      ? "דרוש פול-טריילר מלא (~24 משטחים)"
+      : it.deficitToRefill > 0
+        ? `להזמין ${it.palletsToRefill} משטחים תקניים (${it.deficitToRefill} ${it.rule.unit})`
+        : "מלאי רצפה תקין ומעל סף הביטחון";
+
+    // Count orders that included this product
+    const ordersCount = orders.filter((o) => {
+      if (it.rule.sku && o.itemsFormatted?.includes(it.rule.sku)) return true;
+      if (o.itemsFormatted?.includes(it.rule.name.slice(0, 8))) return true;
+      if (it.rule.category === "big_bag" && (o.logisticsMetrics?.bellaBags ?? 0) > 0) return true;
+      return false;
+    }).length;
+
+    return {
+      sku: it.rule.sku || it.rule.id,
+      cleanName: it.rule.name,
+      originalName: it.rule.name,
+      category: it.rule.category,
+      unit: it.rule.unit,
+      unitsPerPallet,
+      warehouseBranch: branchName,
+      branchNumber,
+      actualDrawn: it.actualDrawn,
+      reserved: it.reserved,
+      totalDemanded: it.totalDemanded,
+      initialBase: it.rule.initialBase,
+      effectiveBalance: it.effectiveBalance,
+      safetyThreshold: it.rule.safetyThreshold,
+      percentRemaining: it.percentRemaining,
+      isCritical: it.isCritical,
+      isWarning: it.isWarning,
+      deficitToRefill: it.deficitToRefill,
+      palletsToRefill: it.palletsToRefill,
+      procurementAdvice,
+      requiresFullTrailer,
+      imageUrl,
+      ordersCount: Math.max(ordersCount, it.actualDrawn > 0 ? 1 : 0),
+    };
+  });
+
+  if (prioritizeCritical) {
+    result.sort((a, b) => {
+      if (a.isCritical && !b.isCritical) return -1;
+      if (!a.isCritical && b.isCritical) return 1;
+      if (a.isWarning && !b.isWarning) return -1;
+      if (!a.isWarning && b.isWarning) return 1;
+      return b.totalDemanded - a.totalDemanded;
+    });
+  }
+
+  return result;
 }

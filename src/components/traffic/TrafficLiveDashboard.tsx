@@ -451,3 +451,5 @@ export function TrafficLiveDashboard({
     </div>
   );
 }
+
+export default TrafficLiveDashboard;

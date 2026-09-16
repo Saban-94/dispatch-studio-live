@@ -161,12 +161,12 @@ export function DispatchScreensaver() {
     syncNow,
   } = useDispatchBoard();
 
-  const { settings: adminSettings, activeSlides } = useAdminControl();
+  const { settings: adminSettings, activeSlides = [] } = useAdminControl();
   const [showAdminModal, setShowAdminModal] = useState(false);
 
   // Initialize active tab from first active slide if possible
   const [activeTab, setActiveTab] = useState<ScreensaverMode>(() => {
-    return (activeSlides[0]?.id as ScreensaverMode) || "product_slide";
+    return (activeSlides?.[0]?.id as ScreensaverMode) || "product_slide";
   });
   const [selectedVideoTheme, setSelectedVideoTheme] = useState(0);
   const [isVideoPlaying, setIsVideoPlaying] = useState(true);
@@ -209,7 +209,7 @@ export function DispatchScreensaver() {
   const [activeStockIndex, setActiveStockIndex] = useState(0);
 
   // Determine current slide duration from adminSettings or fallback
-  const currentSlideConfig = activeSlides.find((s) => s.id === activeTab);
+  const currentSlideConfig = activeSlides?.find((s) => s.id === activeTab);
   const currentSlideDurationSec =
     currentSlideConfig?.durationSeconds || screensaverSettings.cycleIntervalSeconds || 12;
 
@@ -223,7 +223,7 @@ export function DispatchScreensaver() {
   const handleNextSlide = useCallback(() => {
     setActiveTab((currTab) => {
       const available =
-        activeSlides.length > 0
+        activeSlides && activeSlides.length > 0
           ? activeSlides.map((s) => s.id as ScreensaverMode)
           : SCREENSAVER_MODES.map((m) => m.id);
       const currentIdx = available.indexOf(currTab);
@@ -246,7 +246,7 @@ export function DispatchScreensaver() {
           // Switch to next tab smoothly
           setActiveTab((currTab) => {
             const available =
-              activeSlides.length > 0
+              activeSlides && activeSlides.length > 0
                 ? activeSlides.map((s) => s.id as ScreensaverMode)
                 : SCREENSAVER_MODES.map((m) => m.id);
             const currentIdx = available.indexOf(currTab);
@@ -338,7 +338,7 @@ export function DispatchScreensaver() {
 
           {/* Mode Selector Tabs (Dynamic based on Admin settings) */}
           <div className="flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-800/80 p-1 ring-1 ring-slate-700/60 max-w-2xl scrollbar-none">
-            {activeSlides.map((slide) => {
+            {(activeSlides || []).map((slide) => {
               const isSel = activeTab === slide.id;
               const isProduct = slide.id === "product_slide";
               const isInv = slide.id === "INVENTORY_ALERT";
@@ -643,10 +643,10 @@ export function DispatchScreensaver() {
               >
                 <ProductSlide
                   orders={published}
-                  intervalSeconds={adminSettings.productSlideIntervalSeconds}
-                  branchFilter={adminSettings.branchFilter}
-                  prioritizeCritical={adminSettings.prioritizeCriticalProducts}
-                  pauseOnHover={adminSettings.pauseOnHover}
+                  intervalSeconds={adminSettings?.productSlideIntervalSeconds ?? 8}
+                  branchFilter={adminSettings?.branchFilter ?? "all"}
+                  prioritizeCritical={adminSettings?.prioritizeCriticalProducts ?? true}
+                  pauseOnHover={adminSettings?.pauseOnHover ?? true}
                   onCyclePauseChange={setIsCyclePaused}
                 />
               </motion.div>
@@ -664,7 +664,7 @@ export function DispatchScreensaver() {
                 <InventoryAlertSlide
                   orders={published}
                   onRefresh={syncNow}
-                  branchFilter={adminSettings.branchFilter}
+                  branchFilter={adminSettings?.branchFilter ?? "all"}
                 />
               </motion.div>
             )}

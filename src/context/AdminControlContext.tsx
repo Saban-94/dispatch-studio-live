@@ -10,8 +10,93 @@ import type {
   SheetsSyncConfig,
   UserRole,
 } from "@/types/admin";
+import type {
+  ScreensaverAdminSettings,
+  ScreensaverBranchFilter,
+  ScreensaverMode,
+  ScreensaverSlideConfig,
+} from "@/types/screensaver";
 import { playAlarmSound, playNewOrderSound, playStatusChime } from "@/utils/soundEffects";
 import { speakHebrew } from "@/services/voiceAlertService";
+
+export const DEFAULT_SCREENSAVER_ADMIN_SETTINGS: ScreensaverAdminSettings = {
+  slides: [
+    {
+      id: "product_slide",
+      title: "שקופיות מוצר חי (Carousel)",
+      description: "תצוגת כרטיסי מוצר, רמות מלאי רצפה והמלצות רכש",
+      enabled: true,
+      durationSeconds: 15,
+      order: 1,
+      badge: "מוצר חי",
+      category: "product",
+    },
+    {
+      id: "INVENTORY_ALERT",
+      title: "דוח משיכת מלאי (עמודה H)",
+      description: "משיכות יומיות מול ספי ביטחון, חישוב משטחים ופול-טריילר",
+      enabled: true,
+      durationSeconds: 15,
+      order: 2,
+      badge: "התראת רכש מגרש",
+      category: "alert",
+    },
+    {
+      id: "STOCK_ALERT",
+      title: "התראות רכש ומלאי מוגבר",
+      description: "התראות אוטומטיות על חוסרים דחופים במוצרי מפתח",
+      enabled: true,
+      durationSeconds: 12,
+      order: 3,
+      badge: "מלאי מוגבר",
+      category: "alert",
+    },
+    {
+      id: "analytics",
+      title: "מדדי ביצועים ומותגי סבן",
+      description: "תפוקת עבודה, משקל כולל וקצב ליקוט לפי שעות",
+      enabled: true,
+      durationSeconds: 15,
+      order: 4,
+      badge: "דשבורד מבצעי",
+      category: "ops",
+    },
+    {
+      id: "traffic",
+      title: "מצב פקקים ו-ETA משאיות",
+      description: "עומסי תנועה בזמן אמת וצפי הגעת רכבים ללקוחות",
+      enabled: true,
+      durationSeconds: 15,
+      order: 5,
+      badge: "צי רכבים",
+      category: "ops",
+    },
+    {
+      id: "drive_media",
+      title: "מדיה ומצגות מ-Drive",
+      description: "חומרי הדרכה, בטיחות ומדיה מתיקיית Google Drive",
+      enabled: true,
+      durationSeconds: 20,
+      order: 6,
+      badge: "הדרכה ווידאו",
+      category: "media",
+    },
+    {
+      id: "video",
+      title: "וידאו לוגיסטיקה ואווירה",
+      description: "רקע וידאו דינמי ומרגיע בין מחזורי עבודה",
+      enabled: true,
+      durationSeconds: 15,
+      order: 7,
+      badge: "הפוגה מבצעית",
+      category: "media",
+    },
+  ],
+  branchFilter: "all",
+  prioritizeCriticalProducts: true,
+  productSlideIntervalSeconds: 8,
+  pauseOnHover: true,
+};
 
 export const PRESET_USERS: AdminUser[] = [
   {
@@ -367,6 +452,16 @@ interface AdminControlContextType {
   clearAuditLogs: () => void;
   scheduleRules: ScreensaverScheduleRule[];
   updateScheduleRules: (rules: ScreensaverScheduleRule[]) => void;
+  settings: ScreensaverAdminSettings;
+  activeSlides: ScreensaverSlideConfig[];
+  toggleSlide: (id: ScreensaverMode) => void;
+  setSlideDuration: (id: ScreensaverMode, durationSeconds: number) => void;
+  moveSlide: (id: ScreensaverMode, direction: "up" | "down") => void;
+  setBranchFilter: (filter: ScreensaverBranchFilter) => void;
+  setPrioritizeCritical: (val: boolean) => void;
+  setProductSlideInterval: (seconds: number) => void;
+  setPauseOnHover: (val: boolean) => void;
+  resetToDefaults: () => void;
 }
 
 const AdminControlContext = createContext<AdminControlContextType | null>(null);
@@ -378,6 +473,7 @@ const STORAGE_KEYS = {
   BROADCASTS: "saban_admin_broadcasts",
   AUDIT: "saban_admin_audit_logs",
   RULES: "saban_admin_schedule_rules",
+  SCREENSAVER_SETTINGS: "saban_admin_screensaver_settings",
 };
 
 export function AdminControlProvider({ children }: { children: React.ReactNode }) {
@@ -937,6 +1033,163 @@ export function AdminControlProvider({ children }: { children: React.ReactNode }
     [addAuditLog],
   );
 
+  // Screensaver admin settings state
+  const [screensaverAdminSettings, setScreensaverAdminSettings] =
+    useState<ScreensaverAdminSettings>(() => {
+      if (typeof window === "undefined") return DEFAULT_SCREENSAVER_ADMIN_SETTINGS;
+      try {
+        const saved = localStorage.getItem(STORAGE_KEYS.SCREENSAVER_SETTINGS);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            ...DEFAULT_SCREENSAVER_ADMIN_SETTINGS,
+            ...parsed,
+            slides: Array.isArray(parsed.slides)
+              ? parsed.slides
+              : DEFAULT_SCREENSAVER_ADMIN_SETTINGS.slides,
+          };
+        }
+      } catch {
+        /* ignore */
+      }
+      return DEFAULT_SCREENSAVER_ADMIN_SETTINGS;
+    });
+
+  const activeSlides = useMemo(() => {
+    return (screensaverAdminSettings?.slides || []).filter((s) => s.enabled);
+  }, [screensaverAdminSettings?.slides]);
+
+  const toggleSlide = useCallback((id: ScreensaverMode) => {
+    setScreensaverAdminSettings((prev) => {
+      const nextSlides = prev.slides.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s));
+      const updated = { ...prev, slides: nextSlides };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const setSlideDuration = useCallback((id: ScreensaverMode, durationSeconds: number) => {
+    setScreensaverAdminSettings((prev) => {
+      const nextSlides = prev.slides.map((s) =>
+        s.id === id ? { ...s, durationSeconds: Math.max(5, Math.min(120, durationSeconds)) } : s,
+      );
+      const updated = { ...prev, slides: nextSlides };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const moveSlide = useCallback((id: ScreensaverMode, direction: "up" | "down") => {
+    setScreensaverAdminSettings((prev) => {
+      const idx = prev.slides.findIndex((s) => s.id === id);
+      if (idx === -1) return prev;
+      if (direction === "up" && idx === 0) return prev;
+      if (direction === "down" && idx === prev.slides.length - 1) return prev;
+
+      const targetIdx = direction === "up" ? idx - 1 : idx + 1;
+      const newSlides = [...prev.slides];
+      const [removed] = newSlides.splice(idx, 1);
+      if (!removed) return prev;
+      newSlides.splice(targetIdx, 0, removed);
+
+      const reordered = newSlides.map((s, i) => ({ ...s, order: i + 1 }));
+      const updated = { ...prev, slides: reordered };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const setBranchFilter = useCallback((branchFilter: ScreensaverBranchFilter) => {
+    setScreensaverAdminSettings((prev) => {
+      const updated = { ...prev, branchFilter };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const setPrioritizeCritical = useCallback((prioritizeCriticalProducts: boolean) => {
+    setScreensaverAdminSettings((prev) => {
+      const updated = { ...prev, prioritizeCriticalProducts };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const setProductSlideInterval = useCallback((productSlideIntervalSeconds: number) => {
+    setScreensaverAdminSettings((prev) => {
+      const updated = {
+        ...prev,
+        productSlideIntervalSeconds: Math.max(3, Math.min(60, productSlideIntervalSeconds)),
+      };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const setPauseOnHover = useCallback((pauseOnHover: boolean) => {
+    setScreensaverAdminSettings((prev) => {
+      const updated = { ...prev, pauseOnHover };
+      if (typeof window !== "undefined") {
+        try {
+          localStorage.setItem(STORAGE_KEYS.SCREENSAVER_SETTINGS, JSON.stringify(updated));
+        } catch {
+          /* ignore */
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const resetToDefaults = useCallback(() => {
+    setScreensaverAdminSettings(DEFAULT_SCREENSAVER_ADMIN_SETTINGS);
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.setItem(
+          STORAGE_KEYS.SCREENSAVER_SETTINGS,
+          JSON.stringify(DEFAULT_SCREENSAVER_ADMIN_SETTINGS),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
   const value: AdminControlContextType = {
     currentUser,
     setCurrentUser,
@@ -961,6 +1214,16 @@ export function AdminControlProvider({ children }: { children: React.ReactNode }
     clearAuditLogs,
     scheduleRules,
     updateScheduleRules,
+    settings: screensaverAdminSettings,
+    activeSlides,
+    toggleSlide,
+    setSlideDuration,
+    moveSlide,
+    setBranchFilter,
+    setPrioritizeCritical,
+    setProductSlideInterval,
+    setPauseOnHover,
+    resetToDefaults,
   };
 
   return <AdminControlContext.Provider value={value}>{children}</AdminControlContext.Provider>;

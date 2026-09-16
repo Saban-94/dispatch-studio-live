@@ -42,7 +42,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
   const [newScreenName, setNewScreenName] = useState("");
   const [newScreenWarehouse, setNewScreenWarehouse] = useState("מחסן 4 החרש");
   const [newScreenManager, setNewScreenManager] = useState("אורן");
-  const [selectedScreenFilter, setSelectedScreenFilter] = useState<"all" | "online" | "offline">("all");
+  const [selectedScreenFilter, setSelectedScreenFilter] = useState<"all" | "online" | "offline">(
+    "all",
+  );
 
   const filteredScreens = screens.filter((screen) => {
     const matchesSearch =
@@ -85,12 +87,16 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
     toast.success(`נשלחה פקודת ריענון למסך: ${screenName}`);
   };
 
-  const handleToggleScreensaver = (screenId: string, currentForced: boolean, screenName: string) => {
+  const handleToggleScreensaver = (
+    screenId: string,
+    currentForced: boolean,
+    screenName: string,
+  ) => {
     sendRemoteCommand(screenId, "toggle_screensaver");
     toast.success(
       currentForced
         ? `שומר המסך הופסק במסך: ${screenName}`
-        : `הופעל שומר מסך כפוי במסך: ${screenName}`
+        : `הופעל שומר מסך כפוי במסך: ${screenName}`,
     );
   };
 
@@ -108,8 +114,12 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
               <Tv className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-black text-white tracking-tight">ניהול מסכי שידור וצימוד התקנים</h2>
-              <p className="text-xs text-slate-400">צימוד מסכי Smart TV במחסנים, שליטה מרחוק ובקרת שמע</p>
+              <h2 className="text-xl font-black text-white tracking-tight">
+                ניהול מסכי שידור וצימוד התקנים
+              </h2>
+              <p className="text-xs text-slate-400">
+                צימוד מסכי Smart TV במחסנים, שליטה מרחוק ובקרת שמע
+              </p>
             </div>
           </div>
         </div>
@@ -142,7 +152,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
           <button
             onClick={() => setSelectedScreenFilter("all")}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-              selectedScreenFilter === "all" ? "bg-slate-800 text-white font-bold" : "text-slate-400 hover:bg-slate-800/40"
+              selectedScreenFilter === "all"
+                ? "bg-slate-800 text-white font-bold"
+                : "text-slate-400 hover:bg-slate-800/40"
             }`}
           >
             הכל ({screens.length})
@@ -150,7 +162,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
           <button
             onClick={() => setSelectedScreenFilter("online")}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              selectedScreenFilter === "online" ? "bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50" : "text-slate-400 hover:bg-slate-800/40"
+              selectedScreenFilter === "online"
+                ? "bg-emerald-950/80 text-emerald-300 font-bold border border-emerald-800/50"
+                : "text-slate-400 hover:bg-slate-800/40"
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -159,7 +173,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
           <button
             onClick={() => setSelectedScreenFilter("offline")}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 ${
-              selectedScreenFilter === "offline" ? "bg-rose-950/80 text-rose-300 font-bold border border-rose-800/50" : "text-slate-400 hover:bg-slate-800/40"
+              selectedScreenFilter === "offline"
+                ? "bg-rose-950/80 text-rose-300 font-bold border border-rose-800/50"
+                : "text-slate-400 hover:bg-slate-800/40"
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-rose-500" />
@@ -182,7 +198,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-base font-extrabold text-white tracking-tight">{screen.name}</h3>
+                      <h3 className="text-base font-extrabold text-white tracking-tight">
+                        {screen.name}
+                      </h3>
                       <span className="text-[10px] font-mono text-slate-500 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
                         {screen.appVersion}
                       </span>
@@ -195,12 +213,16 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${
-                      isOnline
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                        : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-400 animate-pulse" : "bg-rose-500"}`} />
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full ${
+                        isOnline
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                          : "bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-400 animate-pulse" : "bg-rose-500"}`}
+                      />
                       {isOnline ? "Online (מחובר)" : "Offline (מנותק)"}
                     </span>
                   </div>
@@ -214,16 +236,24 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px]">טוקן צימוד (Token):</span>
-                    <span className="font-mono text-slate-400 text-[11px] truncate block">{screen.deviceToken.slice(0, 16)}...</span>
+                    <span className="font-mono text-slate-400 text-[11px] truncate block">
+                      {screen.deviceToken.slice(0, 16)}...
+                    </span>
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px]">דגם המכשיר:</span>
-                    <span className="text-slate-300 truncate block">{screen.modelInfo || "Smart TV"}</span>
+                    <span className="text-slate-300 truncate block">
+                      {screen.modelInfo || "Smart TV"}
+                    </span>
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px]">סבב ברירת מחדל:</span>
                     <span className="text-amber-400 font-bold">
-                      {screen.defaultRound === "all" ? "כל הסבבים" : screen.defaultRound === "round1" ? "סבב 1 בלבד" : "סבב 2 בלבד"}
+                      {screen.defaultRound === "all"
+                        ? "כל הסבבים"
+                        : screen.defaultRound === "round1"
+                          ? "סבב 1 בלבד"
+                          : "סבב 2 בלבד"}
                     </span>
                   </div>
                 </div>
@@ -232,7 +262,11 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                 <div className="space-y-3 pt-2">
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-1.5 text-slate-300">
-                      {screen.volume === 0 ? <VolumeX className="w-4 h-4 text-slate-500" /> : <Volume2 className="w-4 h-4 text-sky-400" />}
+                      {screen.volume === 0 ? (
+                        <VolumeX className="w-4 h-4 text-slate-500" />
+                      ) : (
+                        <Volume2 className="w-4 h-4 text-sky-400" />
+                      )}
                       <span>עוצמת סאונד וכריזה:</span>
                     </div>
                     <span className="font-mono font-bold text-sky-400">{screen.volume}%</span>
@@ -262,7 +296,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                   </button>
 
                   <button
-                    onClick={() => handleToggleScreensaver(screen.id, screen.forcedScreensaver, screen.name)}
+                    onClick={() =>
+                      handleToggleScreensaver(screen.id, screen.forcedScreensaver, screen.name)
+                    }
                     className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                       screen.forcedScreensaver
                         ? "bg-amber-500/20 text-amber-300 border-amber-500/50"
@@ -313,7 +349,9 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                   <KeyRound className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-white">צימוד מסך חכם (Device Pairing)</h3>
+                  <h3 className="text-base font-black text-white">
+                    צימוד מסך חכם (Device Pairing)
+                  </h3>
                   <p className="text-xs text-slate-400">הזן את קוד הצימוד שמופיע במסך הטלוויזיה</p>
                 </div>
               </div>
@@ -350,7 +388,8 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  הקוד נוצר בעת פתיחת המסך בנתיב <span className="font-mono text-sky-400">/tv</span> ותקף ל-15 דקות.
+                  הקוד נוצר בעת פתיחת המסך בנתיב <span className="font-mono text-sky-400">/tv</span>{" "}
+                  ותקף ל-15 דקות.
                 </p>
               </div>
 
@@ -395,7 +434,10 @@ export default function ScreensPage({ onNavigate }: ScreensPageProps) {
 
               <div className="p-3 bg-sky-950/40 border border-sky-800/40 rounded-xl text-xs text-sky-300 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-                <span>לאחר הצימוד יוקצה למסך Device Token ייעודי בטוח, והוא יקבל עדכונים ופקודות בזמן אמת.</span>
+                <span>
+                  לאחר הצימוד יוקצה למסך Device Token ייעודי בטוח, והוא יקבל עדכונים ופקודות בזמן
+                  אמת.
+                </span>
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">

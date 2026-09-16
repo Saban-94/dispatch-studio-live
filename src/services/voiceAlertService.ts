@@ -189,7 +189,7 @@ export function findBestHebrewFemaleVoice(): SpeechSynthesisVoice | null {
   });
 
   scored.sort((a, b) => b.score - a.score);
-  cachedHebrewVoice = scored[0].voice;
+  cachedHebrewVoice = scored[0]?.voice ?? null;
   return cachedHebrewVoice;
 }
 
