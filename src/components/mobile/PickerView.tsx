@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   PackageCheck,
@@ -193,8 +193,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
 
   const { isInstallable, promptInstall, isIOS } = usePwaInstall();
   const [showInstallBanner, setShowInstallBanner] = useState(true);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -214,22 +212,6 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
       url.searchParams.set("picker", profile);
       window.history.replaceState({}, "", url.toString());
     }
-  };
-
-  const getFullPickerUrl = (profile: "oren" | "tamir" | "tv") => {
-    if (typeof window === "undefined") return "";
-    const origin = window.location.origin;
-    if (profile === "tv") return `${origin}/?mode=tv`;
-    return `${origin}/?mode=picker&picker=${profile}`;
-  };
-
-  const copyToClipboard = async (text: string, key: string) => {
-    if (typeof window === "undefined" || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2500);
-    } catch {}
   };
 
   const toggleExpand = (orderId: string) => {
@@ -407,6 +389,18 @@ export function PickerView({ onSwitchToTv, onOpenTraffic }: PickerViewProps) {
               >
                 <Compass className="size-4 text-sky-500" />
                 <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-500 animate-ping" />
+              </button>
+            )}
+
+            {/* Switch to TV Dashboard */}
+            {onSwitchToTv && (
+              <button
+                type="button"
+                onClick={onSwitchToTv}
+                className="h-10 px-2 rounded-xl bg-primary/15 border border-primary/30 text-primary text-xs font-bold flex items-center gap-1 active:scale-95 shadow-sm"
+              >
+                <Tv className="size-4" />
+                <span>TV</span>
               </button>
             )}
           </div>
